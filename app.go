@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
@@ -110,6 +111,11 @@ func (app *NetAssistantApp) createTCPClient(address string) error {
 	if err != nil {
 		return err
 	}
+	strAddr := conn.LocalAddr().String()
+	arr := strings.Split(strAddr, ":")
+	app.entryLocalPort.SetText(arr[1])
+	app.entryLocalAddr.SetText(arr[0])
+
 	go app.process(conn)
 	return nil
 }
@@ -211,8 +217,7 @@ func (app *NetAssistantApp) onConnectBtnClicked(button *gtk.Button) {
 				strTips := `<span size="x-large" foreground="green">😄</span>`
 				app.labelStatus.SetMarkup(strTips)
 				app.buttonConnect.SetLabel("Disconnect")
-				app.entryLocalPort.SetText(strPort)
-				app.entryLocalAddr.SetText(strIP)
+
 				app.comb.SetSensitive(false)
 			}
 		} else {
