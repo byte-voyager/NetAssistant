@@ -18,6 +18,7 @@ type NetAssistantApp struct {
 	sendCoutn int
 
 	chanClose chan bool
+	chanData  chan string
 
 	appWindow           *gtk.ApplicationWindow // app 主窗口
 	comb                *gtk.ComboBoxText      // 服务类型下拉框
@@ -38,12 +39,14 @@ type NetAssistantApp struct {
 	entryLocalPort      *gtk.Entry    // 当前监听端口
 
 	bufferRecevData *gtk.TextBuffer
+	bufferSendData  *gtk.TextBuffer
 }
 
 // NetAssistantAppNew create new instance
 func NetAssistantAppNew() *NetAssistantApp {
 	obj := &NetAssistantApp{}
 	obj.chanClose = make(chan bool)
+	obj.chanData = make(chan string)
 	return obj
 }
 
@@ -58,6 +61,15 @@ func (app *NetAssistantApp) update(recvStr string) {
 
 func (app *NetAssistantApp) process(conn net.Conn) {
 	defer conn.Close() // 关闭连接
+	go func() {
+		for {
+			select {
+			case value, _ := <-app.chanData:
+				conn.Write([]byte(value))
+				fmt.Println("发送了", value)
+			}
+		}
+	}()
 	for {
 		reader := bufio.NewReader(conn)
 		var buf [2048]byte
@@ -79,6 +91,27 @@ func (app *NetAssistantApp) process(conn net.Conn) {
 
 		glib.IdleAdd(app.update, recvStr) //Make sure is running on the gui thread.
 	}
+}
+
+func (app *NetAssistantApp) createTCPClient(address string) error {
+	conn, err := net.Dial("tcp", address)
+	go func() {
+		for {
+			select {
+			case value := <-app.chanClose:
+				fmt.Println("app.chanClose", value)
+				conn.Close()
+
+				fmt.Println("关闭主连接")
+				return
+			}
+		}
+	}()
+	if err != nil {
+		return err
+	}
+	go app.process(conn)
+	return nil
 }
 
 func (app *NetAssistantApp) createTCPServer(host string, port int) error {
@@ -141,30 +174,77 @@ func (app *NetAssistantApp) onConnectBtnClicked(button *gtk.Button) {
 		return
 	}
 
-	label, _ := app.buttonConnect.GetLabel()
-	if label == "Connect" {
-		err = app.createTCPServer(strIP, port)
-		if err != nil {
-			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
-			app.labelStatus.SetMarkup(strTips)
+	if serverType == 1 {
+		label, _ := app.buttonConnect.GetLabel()
+		if label == "Connect" {
+			err = app.createTCPServer(strIP, port)
+			if err != nil {
+				strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
+				app.labelStatus.SetMarkup(strTips)
+			} else {
+				strTips := `<span size="x-large" foreground="green">😄</span>`
+				app.labelStatus.SetMarkup(strTips)
+				app.buttonConnect.SetLabel("Disconnect")
+				app.entryLocalPort.SetText(strPort)
+				app.entryLocalAddr.SetText(strIP)
+				app.comb.SetSensitive(false)
+			}
 		} else {
-			strTips := `<span size="x-large" foreground="green">😄</span>`
+			fmt.Println("断开连接")
+			app.chanClose <- true
+			strTips := `<span foreground="green" size="x-large" >😎</span>`
 			app.labelStatus.SetMarkup(strTips)
-			app.buttonConnect.SetLabel("Disconnect")
-			app.entryLocalPort.SetText(strPort)
-			app.entryLocalAddr.SetText(strIP)
+			app.buttonConnect.SetLabel("Connect")
+			app.entryLocalPort.SetText("")
+			app.entryLocalAddr.SetText("")
+			app.comb.SetSensitive(true)
 		}
-	} else {
-		fmt.Println("断开连接")
-		app.chanClose <- true
-		strTips := `<span foreground="green" size="x-large" >😎</span>`
-		app.labelStatus.SetMarkup(strTips)
-		app.buttonConnect.SetLabel("Connect")
-		app.entryLocalPort.SetText("")
-		app.entryLocalAddr.SetText("")
+	} else if serverType == 0 {
+		fmt.Println("创建客户端")
+		label, _ := app.buttonConnect.GetLabel()
+		if label == "Connect" {
+			err := app.createTCPClient(strIP + ":" + strPort)
+			if err != nil {
+				strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
+				app.labelStatus.SetMarkup(strTips)
+			} else {
+				strTips := `<span size="x-large" foreground="green">😄</span>`
+				app.labelStatus.SetMarkup(strTips)
+				app.buttonConnect.SetLabel("Disconnect")
+				app.entryLocalPort.SetText(strPort)
+				app.entryLocalAddr.SetText(strIP)
+				app.comb.SetSensitive(false)
+			}
+		} else {
+			fmt.Println("断开连接Client")
+			app.chanClose <- true
+			strTips := `<span foreground="green" size="x-large" >😎</span>`
+			app.labelStatus.SetMarkup(strTips)
+			app.buttonConnect.SetLabel("Connect")
+			app.entryLocalPort.SetText("")
+			app.entryLocalAddr.SetText("")
+			app.comb.SetSensitive(true)
+		}
 	}
 
-	fmt.Println(strIP, port, serverType)
+}
+
+func (app *NetAssistantApp) onSendMessageClicked() {
+	buff, err := app.textViewDataSend.GetBuffer()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println(buff)
+	}
+
+	start, end := buff.GetBounds()
+	data, _ := buff.GetText(start, end, false)
+	fmt.Println("data", data)
+	go func() {
+		app.chanData <- data
+		fmt.Println("往app.sendData写入数据成功！")
+	}()
+
 }
 
 func (app *NetAssistantApp) onClearRecvDisplay() {
@@ -297,11 +377,13 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	windowContainerRight.PackStart(middleContainer, false, false, 0)
 	bottomContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	scrollerDataSend, _ := gtk.ScrolledWindowNew(nil, nil)
-	textViewDataSend, _ := gtk.TextViewNew()
-	scrollerDataSend.Add(textViewDataSend)
+	app.textViewDataSend, _ = gtk.TextViewNew()
+
+	scrollerDataSend.Add(app.textViewDataSend)
 	scrollerDataSend.SetSizeRequest(-1, 180)
 	boxSendBtn, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	app.sendBtn, _ = gtk.ButtonNewWithLabel("发送")
+	app.sendBtn.Connect("clicked", app.onSendMessageClicked)
 	boxSendBtn.PackEnd(app.sendBtn, false, false, 0)
 	app.sendBtn.SetSizeRequest(80, -1)
 	bottomContainer.PackStart(scrollerDataSend, true, true, 0)
@@ -339,7 +421,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 func main() {
 
 	const appID = "org.gtk.example"
-	application, err := gtk.ApplicationNew(appID, glib.APPLICATION_FLAGS_NONE)
+	application, err := gtk.ApplicationNew(appID, glib.APPLICATION_NON_UNIQUE)
 
 	if err != nil {
 		log.Fatal("Could not create application.", err)
