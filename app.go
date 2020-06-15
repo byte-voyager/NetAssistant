@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
@@ -41,6 +42,10 @@ type NetAssistantApp struct {
 	entryCurAddr        *gtk.Entry    // 当前监听地址
 	entryCurPort        *gtk.Entry    // 当前监听端口
 
+	cbHexDisplay   *gtk.CheckButton
+	cbPauseDisplay *gtk.CheckButton
+	cbDisplayDate  *gtk.CheckButton
+
 	tbReceData *gtk.TextBuffer //接收区buffer
 	tbSendData *gtk.TextBuffer // 发送区buffer
 }
@@ -54,11 +59,24 @@ func NetAssistantAppNew() *NetAssistantApp {
 }
 
 func (app *NetAssistantApp) update(recvStr string) {
+	list := []string{}
+	if app.cbHexDisplay.GetActive() {
+		for i, ch := range recvStr {
+			log.Println(i, ch)
+			list = append(list, fmt.Sprintf("%X", ch))
+		}
+		recvStr = strings.Join(list, " ")
+	}
+
+	if app.cbDisplayDate.GetActive() {
+		recvStr = fmt.Sprintf("[%s]:%s\n", time.Now().Format("2006-01-02 15:04:05"), recvStr)
+	}
 	iter := app.tbReceData.GetEndIter()
 	app.tbReceData.Insert(iter, recvStr)
 	app.labelReceveCount.SetText("接收计数：" + strconv.Itoa(app.receCount))
 	app.tbReceData.CreateMark("end", iter, false)
 	mark := app.tbReceData.GetMark("end")
+
 	app.tvDataReceive.ScrollMarkOnscreen(mark)
 }
 
@@ -67,7 +85,7 @@ func (app *NetAssistantApp) updateSendCount(count int) {
 	app.labelSendCount.SetText("发送计数：" + strconv.Itoa(app.sendCount))
 }
 
-func (app *NetAssistantApp) process(conn net.Conn) {
+func (app *NetAssistantApp) handler(conn net.Conn) {
 	defer conn.Close() // 关闭连接
 
 	for {
@@ -89,8 +107,10 @@ func (app *NetAssistantApp) process(conn net.Conn) {
 		}
 		app.receCount += n
 		recvStr := string(buf[:n])
+		if !app.cbPauseDisplay.GetActive() {
+			glib.IdleAdd(app.update, recvStr) //Make sure is running on the gui thread.
+		}
 
-		glib.IdleAdd(app.update, recvStr) //Make sure is running on the gui thread.
 	}
 }
 
@@ -104,7 +124,7 @@ func (app *NetAssistantApp) createTCPClient(address string) (net.Conn, error) {
 	app.entryCurPort.SetText(arr[1])
 	app.entryCurAddr.SetText(arr[0])
 
-	go app.process(conn)
+	go app.handler(conn)
 	return conn, nil
 }
 
@@ -122,19 +142,16 @@ func (app *NetAssistantApp) createTCPServer(addr string) (net.Listener, error) {
 
 	go func() {
 		for {
-
 			conn, err := listen.Accept() // 等待客户端
-
 			if err != nil {
 				log.Println("accept 失败, err:", err, "退出监听")
 				return
 			}
-
 			ss := conn.RemoteAddr().String()
 			tips := fmt.Sprintf(`<span foreground="green">😄 New connection: %s </span>`, ss)
 			app.labelStatus.SetMarkup(tips)
 			app.connList = append(app.connList, conn)
-			go app.process(conn) // 启动一个goroutine处理连接
+			go app.handler(conn)
 		}
 
 	}()
@@ -291,11 +308,11 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	windowContainerBottom, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 
 	// 左边的布局
-	frame, _ := gtk.FrameNew("Network")
+	frame, _ := gtk.FrameNew("网络设置")
 	frame.SetLabelAlign(0.1, 0.5)
 	verticalBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	// 1 服务类型的组件
-	labelProtType, _ := gtk.LabelNew("Type")
+	labelProtType, _ := gtk.LabelNew("服务类型")
 	labelProtType.SetXAlign(0)
 	app.combProtoType, _ = gtk.ComboBoxTextNew()
 	app.combProtoType.AppendText("TCP Client")
@@ -330,10 +347,10 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	// 接收设置
 	frame1ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
-	receive2FileCb, _ := gtk.CheckButtonNewWithLabel("接收转向文件")
-	displayDateCb, _ := gtk.CheckButtonNewWithLabel("显示接收日期")
-	hexDisplayCb, _ := gtk.CheckButtonNewWithLabel("十六进制显示")
-	pauseDisplayCb, _ := gtk.CheckButtonNewWithLabel("暂停接收显示")
+	cbReceive2File, _ := gtk.CheckButtonNewWithLabel("接收转向文件")
+	app.cbDisplayDate, _ = gtk.CheckButtonNewWithLabel("显示时间且换行")
+	app.cbHexDisplay, _ = gtk.CheckButtonNewWithLabel("十六进制显示")
+	app.cbPauseDisplay, _ = gtk.CheckButtonNewWithLabel("暂停接收")
 	btnHboxContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	saveDataCb, _ := gtk.ButtonNewWithLabel("保存数据")
 	app.btnClearRecvDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
@@ -341,10 +358,10 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	btnHboxContainer.PackStart(saveDataCb, true, false, 0)
 	btnHboxContainer.PackStart(app.btnClearRecvDisplay, true, false, 0)
-	frame1ContentBox.PackStart(receive2FileCb, false, false, 0)
-	frame1ContentBox.PackStart(displayDateCb, false, false, 0)
-	frame1ContentBox.PackStart(hexDisplayCb, false, false, 0)
-	frame1ContentBox.PackStart(pauseDisplayCb, false, false, 0)
+	frame1ContentBox.PackStart(cbReceive2File, false, false, 0)
+	frame1ContentBox.PackStart(app.cbDisplayDate, false, false, 0)
+	frame1ContentBox.PackStart(app.cbHexDisplay, false, false, 0)
+	frame1ContentBox.PackStart(app.cbPauseDisplay, false, false, 0)
 	frame1ContentBox.PackStart(btnHboxContainer, false, false, 0)
 	frame1ContentBox.SetBorderWidth(10)
 
