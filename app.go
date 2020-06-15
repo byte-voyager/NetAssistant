@@ -16,31 +16,33 @@ import (
 // NetAssistantApp Main
 type NetAssistantApp struct {
 	receCount int
-	sendCoutn int
+	sendCount int
 
 	chanClose chan bool
 	chanData  chan string
+	listener  net.Listener
+	connList  []net.Conn
 
 	appWindow           *gtk.ApplicationWindow // app 主窗口
-	comb                *gtk.ComboBoxText      // 服务类型下拉框
+	combProtoType       *gtk.ComboBoxText      // 服务类型下拉框
 	entryIP             *gtk.Entry             // IP地址
 	entryPort           *gtk.Entry             // 端口
-	buttonConnect       *gtk.Button            // 连接按钮
-	clearReceDisplayCb  *gtk.Button            // 清空接收区
-	clearSendDisplayBtn *gtk.Button            // 清空发送区
+	btnConnect          *gtk.Button            // 连接按钮
+	btnClearRecvDisplay *gtk.Button            // 清空接收区
+	btnClearSendDisplay *gtk.Button            // 清空发送区
 	labelStatus         *gtk.Label             // 当前状态提示
 	labelSendCount      *gtk.Label             // 发送计数
 	labelReceveCount    *gtk.Label             // 接收计数
 	btnCleanCount       *gtk.Button            // 复位计数按钮
-	textViewDataReceive *gtk.TextView          // 数据接收区
-	scrollerDataRec     *gtk.ScrolledWindow
-	textViewDataSend    *gtk.TextView // 数据发送区
-	sendBtn             *gtk.Button   // 发送消息按钮
-	entryLocalAddr      *gtk.Entry    // 当前监听地址
-	entryLocalPort      *gtk.Entry    // 当前监听端口
+	tvDataReceive       *gtk.TextView          // 数据接收区
+	swDataRec           *gtk.ScrolledWindow
+	tvDataSend          *gtk.TextView // 数据发送区
+	btnSend             *gtk.Button   // 发送消息按钮
+	entryCurAddr        *gtk.Entry    // 当前监听地址
+	entryCurPort        *gtk.Entry    // 当前监听端口
 
-	bufferRecevData *gtk.TextBuffer
-	bufferSendData  *gtk.TextBuffer
+	tbReceData *gtk.TextBuffer //接收区buffer
+	tbSendData *gtk.TextBuffer // 发送区buffer
 }
 
 // NetAssistantAppNew create new instance
@@ -52,208 +54,224 @@ func NetAssistantAppNew() *NetAssistantApp {
 }
 
 func (app *NetAssistantApp) update(recvStr string) {
-	iter := app.bufferRecevData.GetEndIter()
-	app.bufferRecevData.Insert(iter, recvStr)
+	iter := app.tbReceData.GetEndIter()
+	app.tbReceData.Insert(iter, recvStr)
 	app.labelReceveCount.SetText("接收计数：" + strconv.Itoa(app.receCount))
-	app.bufferRecevData.CreateMark("end", iter, false)
-	mark := app.bufferRecevData.GetMark("end")
-	app.textViewDataReceive.ScrollMarkOnscreen(mark)
+	app.tbReceData.CreateMark("end", iter, false)
+	mark := app.tbReceData.GetMark("end")
+	app.tvDataReceive.ScrollMarkOnscreen(mark)
+}
+
+func (app *NetAssistantApp) updateSendCount(count int) {
+	app.sendCount += count
+	app.labelSendCount.SetText("发送计数：" + strconv.Itoa(app.sendCount))
 }
 
 func (app *NetAssistantApp) process(conn net.Conn) {
 	defer conn.Close() // 关闭连接
-	go func() {
-		for {
-			select {
-			case value, _ := <-app.chanData:
-				conn.Write([]byte(value))
-				fmt.Println("发送了", value)
-			}
-		}
-	}()
+
 	for {
 		reader := bufio.NewReader(conn)
 		var buf [2048]byte
 		n, err := reader.Read(buf[:]) // 读取数据
 		if err != nil {
-			fmt.Println("read from client failed, err:", err)
-			break
+			fmt.Println("从客户端读取数据异常，关闭此连接:", err)
+			ss := conn.RemoteAddr().String()
+			tips := fmt.Sprintf(`<span foreground="pink">😄 connection close: %s </span>`, ss)
+			app.labelStatus.SetMarkup(tips)
+			for index, connItem := range app.connList {
+				if conn.LocalAddr().String() == connItem.LocalAddr().String() {
+					app.connList = append(app.connList[:index], app.connList[index+1:]...)
+					log.Println("已经踢了")
+				}
+			}
+			return
 		}
 		app.receCount += n
 		recvStr := string(buf[:n])
-		fmt.Println("收到client端发来的数据：", recvStr)
-		fmt.Println("解析数据1")
-		if app.bufferRecevData == nil {
-			app.bufferRecevData, _ = gtk.TextBufferNew(nil)
-			fmt.Println("解析数据2")
-			app.textViewDataReceive.SetBuffer(app.bufferRecevData)
-			fmt.Println("解析数据3")
-		}
 
 		glib.IdleAdd(app.update, recvStr) //Make sure is running on the gui thread.
 	}
 }
 
-func (app *NetAssistantApp) createTCPClient(address string) error {
+func (app *NetAssistantApp) createTCPClient(address string) (net.Conn, error) {
 	conn, err := net.Dial("tcp", address)
-	go func() {
-		for {
-			select {
-			case value := <-app.chanClose:
-				fmt.Println("app.chanClose", value)
-				conn.Close()
-
-				fmt.Println("关闭主连接")
-				return
-			}
-		}
-	}()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	strAddr := conn.LocalAddr().String()
 	arr := strings.Split(strAddr, ":")
-	app.entryLocalPort.SetText(arr[1])
-	app.entryLocalAddr.SetText(arr[0])
+	app.entryCurPort.SetText(arr[1])
+	app.entryCurAddr.SetText(arr[0])
 
 	go app.process(conn)
-	return nil
+	return conn, nil
 }
 
-func (app *NetAssistantApp) createTCPServer(host string, port int) error {
-	listen, err := net.Listen("tcp", host+":"+strconv.Itoa(port))
+func init() {
+	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
+}
+
+func (app *NetAssistantApp) createTCPServer(addr string) (net.Listener, error) {
+	listen, err := net.Listen("tcp", addr)
 
 	if err != nil {
-		fmt.Println("listen failed, err:", err)
-		return err
+		log.Println("listen failed, err:", err)
+		return nil, err
 	}
 
 	go func() {
 		for {
-			select {
-			case value := <-app.chanClose:
-				fmt.Println("app.chanClose", value)
-				listen.Close()
 
-				fmt.Println("关闭主连接")
-				return
-			}
-		}
-	}()
-	go func() {
-		for {
-
-			conn, err := listen.Accept() // 建立连接
+			conn, err := listen.Accept() // 等待客户端
 
 			if err != nil {
-				fmt.Println("accept failed, err:", err)
+				log.Println("accept 失败, err:", err, "退出监听")
 				return
 			}
 
 			ss := conn.RemoteAddr().String()
-			tips := fmt.Sprintf(`<span foreground="green">😄 New Connect: %s </span>`, ss)
+			tips := fmt.Sprintf(`<span foreground="green">😄 New connection: %s </span>`, ss)
 			app.labelStatus.SetMarkup(tips)
-
+			app.connList = append(app.connList, conn)
 			go app.process(conn) // 启动一个goroutine处理连接
 		}
 
 	}()
 
-	return nil
+	return listen, nil
 }
 
-func (app *NetAssistantApp) onCleanCountClicked() {
+func (app *NetAssistantApp) onBtnCleanCount() {
 	app.receCount = 0
-	app.sendCoutn = 0
+	app.sendCount = 0
 	app.labelReceveCount.SetText("接收计数：0")
 	app.labelSendCount.SetText("发送计数：0")
 }
 
-func (app *NetAssistantApp) onConnectBtnClicked(button *gtk.Button) {
-	strIP, _ := app.entryIP.GetText()
-	strPort, _ := app.entryPort.GetText()
-	serverType := app.comb.GetActive()
-	port, err := strconv.Atoi(strPort)
-
-	if err != nil {
-		app.labelStatus.SetMarkup(`<span foreground="red">😰 Invalid Port</span>`)
-		return
-	}
-
-	if serverType == 1 {
-		label, _ := app.buttonConnect.GetLabel()
-		if label == "Connect" {
-			err = app.createTCPServer(strIP, port)
-			if err != nil {
-				strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
-				app.labelStatus.SetMarkup(strTips)
-			} else {
-				strTips := `<span size="x-large" foreground="green">😄</span>`
-				app.labelStatus.SetMarkup(strTips)
-				app.buttonConnect.SetLabel("Disconnect")
-				app.entryLocalPort.SetText(strPort)
-				app.entryLocalAddr.SetText(strIP)
-				app.comb.SetSensitive(false)
-			}
-		} else {
-			fmt.Println("断开连接")
-			app.chanClose <- true
-			strTips := `<span foreground="green" size="x-large" >😎</span>`
-			app.labelStatus.SetMarkup(strTips)
-			app.buttonConnect.SetLabel("Connect")
-			app.entryLocalPort.SetText("")
-			app.entryLocalAddr.SetText("")
-			app.comb.SetSensitive(true)
+func (app *NetAssistantApp) connectOrDisconectServer(isDisconnect bool, host, port string) {
+	if !isDisconnect {
+		log.Println("开始监听")
+		if app.listener != nil {
+			app.listener.Close()
 		}
-	} else if serverType == 0 {
-		fmt.Println("创建客户端")
-		label, _ := app.buttonConnect.GetLabel()
-		if label == "Connect" {
-			err := app.createTCPClient(strIP + ":" + strPort)
-			if err != nil {
-				strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
-				app.labelStatus.SetMarkup(strTips)
-			} else {
-				strTips := `<span size="x-large" foreground="green">😄</span>`
-				app.labelStatus.SetMarkup(strTips)
-				app.buttonConnect.SetLabel("Disconnect")
+		listener, err := app.createTCPServer(host + ":" + port)
 
-				app.comb.SetSensitive(false)
-			}
-		} else {
-			fmt.Println("断开连接Client")
-			app.chanClose <- true
-			strTips := `<span foreground="green" size="x-large" >😎</span>`
+		if err != nil {
+			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
 			app.labelStatus.SetMarkup(strTips)
-			app.buttonConnect.SetLabel("Connect")
-			app.entryLocalPort.SetText("")
-			app.entryLocalAddr.SetText("")
-			app.comb.SetSensitive(true)
+		} else {
+			app.listener = listener
+			strTips := `<span size="x-large" foreground="green">😄</span>`
+			app.labelStatus.SetMarkup(strTips)
+			app.btnConnect.SetLabel("Disconnect")
+			app.entryCurPort.SetText(port)
+			app.entryCurAddr.SetText(host)
+			app.combProtoType.SetSensitive(false)
 		}
+	} else {
+		log.Println("断开监听")
+		if app.listener != nil {
+			app.listener.Close()
+			app.listener = nil
+			for _, conn := range app.connList {
+				conn.Close()
+			}
+			app.connList = []net.Conn{}
+			fmt.Println("清空连接")
+
+		}
+		strTips := `<span foreground="green" size="x-large" >😎</span>`
+		app.labelStatus.SetMarkup(strTips)
+		app.btnConnect.SetLabel("Connect")
+		app.entryCurAddr.SetText("")
+		app.entryCurPort.SetText("")
+		app.combProtoType.SetSensitive(true)
 	}
 
 }
 
-func (app *NetAssistantApp) onSendMessageClicked() {
-	buff, err := app.textViewDataSend.GetBuffer()
+func (app *NetAssistantApp) connectOrDisconectClient(isDisconnect bool, host, port string) {
+	if !isDisconnect {
+		log.Println("连接客户端")
+		if len(app.connList) != 0 {
+			for _, conn := range app.connList {
+				conn.Close()
+			}
+			app.connList = []net.Conn{}
+		}
+		conn, err := app.createTCPClient(host + ":" + port)
+
+		if err != nil {
+			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
+			app.labelStatus.SetMarkup(strTips)
+		} else {
+			app.connList = append(app.connList, conn)
+			strTips := `<span size="x-large" foreground="green">😄</span>`
+			app.labelStatus.SetMarkup(strTips)
+			app.btnConnect.SetLabel("Disconnect")
+			ss := conn.LocalAddr().String()
+			ssArr := strings.Split(ss, ":")
+			app.entryCurAddr.SetText(ssArr[0])
+			app.entryCurPort.SetText(ssArr[1])
+			app.combProtoType.SetSensitive(false)
+		}
+	} else {
+		log.Println("断开客户端")
+
+		for _, conn := range app.connList {
+			conn.Close()
+		}
+		app.connList = []net.Conn{}
+		log.Println("清空连接")
+
+		strTips := `<span foreground="green" size="x-large" >😎</span>`
+		app.labelStatus.SetMarkup(strTips)
+		app.btnConnect.SetLabel("Connect")
+		app.entryCurAddr.SetText("")
+		app.entryCurPort.SetText("")
+		app.combProtoType.SetSensitive(true)
+	}
+}
+
+func (app *NetAssistantApp) onBtnConnect(button *gtk.Button) {
+
+	strIP, _ := app.entryIP.GetText()
+	strPort, _ := app.entryPort.GetText()
+	serverType := app.combProtoType.GetActive()
+
+	label, _ := app.btnConnect.GetLabel()
+	isDisconnect := label == "Disconnect"
+	if serverType == 1 {
+		app.connectOrDisconectServer(isDisconnect, strIP, strPort)
+
+	} else if serverType == 0 {
+		app.connectOrDisconectClient(isDisconnect, strIP, strPort)
+	}
+
+}
+
+func (app *NetAssistantApp) onBtnSend() {
+
+	buff, err := app.tvDataSend.GetBuffer()
 	if err != nil {
 		fmt.Println(err)
-	} else {
-		fmt.Println(buff)
 	}
 
 	start, end := buff.GetBounds()
-	data, _ := buff.GetText(start, end, false)
-	fmt.Println("data", data)
-	go func() {
-		app.chanData <- data
-		fmt.Println("往app.sendData写入数据成功！")
-	}()
+	data, _ := buff.GetText(start, end, true)
+
+	for _, conn := range app.connList {
+		conn.Write([]byte(data))
+		fmt.Println("Write data", data)
+		app.updateSendCount(len([]byte(data)))
+	}
 
 }
 
-func (app *NetAssistantApp) onClearRecvDisplay() {
-	app.bufferRecevData.SetText("")
+func (app *NetAssistantApp) onBtnClearRecvDisplay() {
+	app.tbReceData.SetText("")
+
 }
 
 func (app *NetAssistantApp) doActivate(application *gtk.Application) {
@@ -263,7 +281,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.appWindow.SetIconFromFile("./icon.png")
 
 	app.appWindow.SetBorderWidth(10)
-	app.appWindow.SetTitle("网络调试助手")
+	app.appWindow.SetTitle("NetAssistant")
 
 	// 总体容器
 	windowContainer, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
@@ -271,21 +289,21 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	windowContainerLeft, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	windowContainerRight, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	windowContainerBottom, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
-	// 左边的布局
 
-	frame, _ := gtk.FrameNew("网络设置")
+	// 左边的布局
+	frame, _ := gtk.FrameNew("Network")
 	frame.SetLabelAlign(0.1, 0.5)
 	verticalBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	// 1 服务类型的组件
-	labelProtType, _ := gtk.LabelNew("服务类型")
+	labelProtType, _ := gtk.LabelNew("Type")
 	labelProtType.SetXAlign(0)
-	app.comb, _ = gtk.ComboBoxTextNew()
-	app.comb.AppendText("TCP Client")
-	app.comb.AppendText("TCP Server")
-	app.comb.SetActive(0)
+	app.combProtoType, _ = gtk.ComboBoxTextNew()
+	app.combProtoType.AppendText("TCP Client")
+	app.combProtoType.AppendText("TCP Server")
+	app.combProtoType.SetActive(0)
 	// 添加到容器
 	verticalBox.PackStart(labelProtType, false, false, 0)
-	verticalBox.PackStart(app.comb, false, false, 0)
+	verticalBox.PackStart(app.combProtoType, false, false, 0)
 	// 2 服务器IP设置
 	labelIP, _ := gtk.LabelNew("IP设置")
 	labelIP.SetXAlign(0)
@@ -301,10 +319,9 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	verticalBox.PackStart(labelPort, false, false, 0)
 	verticalBox.PackStart(app.entryPort, false, false, 0)
 	// 4 连接按钮
-	app.buttonConnect, _ = gtk.ButtonNewWithLabel("Connect")
-	app.buttonConnect.Connect("clicked", app.onConnectBtnClicked)
-
-	verticalBox.PackStart(app.buttonConnect, false, false, 0)
+	app.btnConnect, _ = gtk.ButtonNewWithLabel("Connect")
+	app.btnConnect.Connect("clicked", app.onBtnConnect)
+	verticalBox.PackStart(app.btnConnect, false, false, 0)
 
 	// 5 两个切换按钮
 	notebookTab, _ := gtk.NotebookNew()
@@ -319,11 +336,11 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	pauseDisplayCb, _ := gtk.CheckButtonNewWithLabel("暂停接收显示")
 	btnHboxContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	saveDataCb, _ := gtk.ButtonNewWithLabel("保存数据")
-	app.clearReceDisplayCb, _ = gtk.ButtonNewWithLabel("清空显示")
-	app.clearReceDisplayCb.Connect("clicked", app.onClearRecvDisplay)
+	app.btnClearRecvDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
+	app.btnClearRecvDisplay.Connect("clicked", app.onBtnClearRecvDisplay)
 
 	btnHboxContainer.PackStart(saveDataCb, true, false, 0)
-	btnHboxContainer.PackStart(app.clearReceDisplayCb, true, false, 0)
+	btnHboxContainer.PackStart(app.btnClearRecvDisplay, true, false, 0)
 	frame1ContentBox.PackStart(receive2FileCb, false, false, 0)
 	frame1ContentBox.PackStart(displayDateCb, false, false, 0)
 	frame1ContentBox.PackStart(hexDisplayCb, false, false, 0)
@@ -339,14 +356,14 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	dataSourceCycleSendCb, _ := gtk.CheckButtonNewWithLabel("数据源循环发送")
 	btnHboxContainer2, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	loadDataBtn, _ := gtk.ButtonNewWithLabel("加载数据")
-	app.clearSendDisplayBtn, _ = gtk.ButtonNewWithLabel("清空显示")
+	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
 
 	frame2ContentBox.PackStart(enabelFileSourceCb, false, false, 0)
 	frame2ContentBox.PackStart(autoCleanAfterSendCb, false, false, 0)
 	frame2ContentBox.PackStart(sendByHexCb, false, false, 0)
 	frame2ContentBox.PackStart(dataSourceCycleSendCb, false, false, 0)
 	btnHboxContainer2.PackStart(loadDataBtn, true, false, 0)
-	btnHboxContainer2.PackStart(app.clearSendDisplayBtn, true, false, 0)
+	btnHboxContainer2.PackStart(app.btnClearSendDisplay, true, false, 0)
 	frame2ContentBox.PackStart(btnHboxContainer2, false, false, 0)
 	frame2ContentBox.SetBorderWidth(10)
 
@@ -362,35 +379,35 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	titleDataReceiveArea, _ := gtk.LabelNew("数据接收区")
 	titleDataReceiveArea.SetXAlign(0)
 	windowContainerRight.PackStart(titleDataReceiveArea, false, false, 0)
-	app.scrollerDataRec, _ = gtk.ScrolledWindowNew(nil, nil)
-	app.textViewDataReceive, _ = gtk.TextViewNew()
-	app.textViewDataReceive.SetEditable(false)
-	app.textViewDataReceive.SetWrapMode(gtk.WRAP_CHAR)
-	app.scrollerDataRec.Add(app.textViewDataReceive)
-	windowContainerRight.PackStart(app.scrollerDataRec, true, true, 0)
+	app.swDataRec, _ = gtk.ScrolledWindowNew(nil, nil)
+	app.tvDataReceive, _ = gtk.TextViewNew()
+	app.tvDataReceive.SetEditable(false)
+	app.tvDataReceive.SetWrapMode(gtk.WRAP_CHAR)
+	app.swDataRec.Add(app.tvDataReceive)
+	windowContainerRight.PackStart(app.swDataRec, true, true, 0)
 	middleContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	labelLocalAddr, _ := gtk.LabelNew("当前地址")
-	app.entryLocalAddr, _ = gtk.EntryNew()
-	app.entryLocalAddr.SetEditable(false)
+	app.entryCurAddr, _ = gtk.EntryNew()
+	app.entryCurAddr.SetEditable(false)
 	labelLocalPort, _ := gtk.LabelNew("当前端口")
-	app.entryLocalPort, _ = gtk.EntryNew()
-	app.entryLocalPort.SetEditable(false)
+	app.entryCurPort, _ = gtk.EntryNew()
+	app.entryCurPort.SetEditable(false)
 	middleContainer.PackStart(labelLocalAddr, false, false, 0)
-	middleContainer.PackStart(app.entryLocalAddr, false, false, 0)
+	middleContainer.PackStart(app.entryCurAddr, false, false, 0)
 	middleContainer.PackStart(labelLocalPort, false, false, 0)
-	middleContainer.PackStart(app.entryLocalPort, false, false, 0)
+	middleContainer.PackStart(app.entryCurPort, false, false, 0)
 	windowContainerRight.PackStart(middleContainer, false, false, 0)
 	bottomContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	scrollerDataSend, _ := gtk.ScrolledWindowNew(nil, nil)
-	app.textViewDataSend, _ = gtk.TextViewNew()
+	app.tvDataSend, _ = gtk.TextViewNew()
 
-	scrollerDataSend.Add(app.textViewDataSend)
+	scrollerDataSend.Add(app.tvDataSend)
 	scrollerDataSend.SetSizeRequest(-1, 180)
 	boxSendBtn, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
-	app.sendBtn, _ = gtk.ButtonNewWithLabel("发送")
-	app.sendBtn.Connect("clicked", app.onSendMessageClicked)
-	boxSendBtn.PackEnd(app.sendBtn, false, false, 0)
-	app.sendBtn.SetSizeRequest(80, -1)
+	app.btnSend, _ = gtk.ButtonNewWithLabel("发送")
+	app.btnSend.Connect("clicked", app.onBtnSend)
+	boxSendBtn.PackEnd(app.btnSend, false, false, 0)
+	app.btnSend.SetSizeRequest(80, -1)
 	bottomContainer.PackStart(scrollerDataSend, true, true, 0)
 	bottomContainer.PackEnd(boxSendBtn, false, false, 0)
 	windowContainerRight.PackStart(bottomContainer, false, false, 0)
@@ -404,7 +421,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.labelReceveCount, _ = gtk.LabelNew("接收计数 0")
 	windowContainerBottom.PackStart(app.labelReceveCount, true, false, 0)
 	app.btnCleanCount, _ = gtk.ButtonNewWithLabel("复位计数")
-	app.btnCleanCount.Connect("clicked", app.onCleanCountClicked)
+	app.btnCleanCount.Connect("clicked", app.onBtnCleanCount)
 
 	windowContainerBottom.PackEnd(app.btnCleanCount, false, false, 0)
 
@@ -421,6 +438,11 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	app.appWindow.SetDefaultSize(400, 400)
 	app.appWindow.ShowAll()
+
+	if app.tbReceData == nil {
+		app.tbReceData, _ = gtk.TextBufferNew(nil)
+		app.tvDataReceive.SetBuffer(app.tbReceData)
+	}
 }
 
 func main() {
