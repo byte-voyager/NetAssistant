@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -24,30 +25,32 @@ type NetAssistantApp struct {
 	listener  net.Listener
 	connList  []net.Conn
 
-	appWindow           *gtk.ApplicationWindow // app 主窗口
-	combProtoType       *gtk.ComboBoxText      // 服务类型下拉框
-	entryIP             *gtk.Entry             // IP地址
-	entryPort           *gtk.Entry             // 端口
-	btnConnect          *gtk.Button            // 连接按钮
-	btnClearRecvDisplay *gtk.Button            // 清空接收区
-	btnClearSendDisplay *gtk.Button            // 清空发送区
-	labelStatus         *gtk.Label             // 当前状态提示
-	labelSendCount      *gtk.Label             // 发送计数
-	labelReceveCount    *gtk.Label             // 接收计数
-	btnCleanCount       *gtk.Button            // 复位计数按钮
-	tvDataReceive       *gtk.TextView          // 数据接收区
-	swDataRec           *gtk.ScrolledWindow
-	tvDataSend          *gtk.TextView // 数据发送区
-	btnSend             *gtk.Button   // 发送消息按钮
-	entryCurAddr        *gtk.Entry    // 当前监听地址
-	entryCurPort        *gtk.Entry    // 当前监听端口
-
-	cbHexDisplay   *gtk.CheckButton
-	cbPauseDisplay *gtk.CheckButton
-	cbDisplayDate  *gtk.CheckButton
-
-	tbReceData *gtk.TextBuffer //接收区buffer
-	tbSendData *gtk.TextBuffer // 发送区buffer
+	appWindow             *gtk.ApplicationWindow // app 主窗口
+	combProtoType         *gtk.ComboBoxText      // 服务类型下拉框
+	entryIP               *gtk.Entry             // IP地址
+	entryPort             *gtk.Entry             // 端口
+	btnConnect            *gtk.Button            // 连接按钮
+	btnClearRecvDisplay   *gtk.Button            // 清空接收区
+	btnClearSendDisplay   *gtk.Button            // 清空发送区
+	labelStatus           *gtk.Label             // 当前状态提示
+	labelSendCount        *gtk.Label             // 发送计数
+	labelReceveCount      *gtk.Label             // 接收计数
+	btnCleanCount         *gtk.Button            // 复位计数按钮
+	tvDataReceive         *gtk.TextView          // 数据接收区
+	swDataRec             *gtk.ScrolledWindow    // 数据接收区的滚动窗口
+	tvDataSend            *gtk.TextView          // 数据发送区
+	btnSend               *gtk.Button            // 发送消息按钮
+	entryCurAddr          *gtk.Entry             // 当前监听地址
+	entryCurPort          *gtk.Entry             // 当前监听端口
+	cbHexDisplay          *gtk.CheckButton       // 16进制显示
+	cbPauseDisplay        *gtk.CheckButton       // 暂停显示
+	cbDisplayDate         *gtk.CheckButton       // 接收显示日期且换行
+	cbDataSourceCycleSend *gtk.CheckButton       // 数据循环发送
+	cbSendByHex           *gtk.CheckButton       // 数据以16进制发送
+	tbReceData            *gtk.TextBuffer        //接收区buffer
+	tbSendData            *gtk.TextBuffer        // 发送区buffer
+	entryCycleTime        *gtk.Entry             // 持续发送数据的间隔
+	cbAutoCleanAfterSend  *gtk.CheckButton       // 发送后清空
 }
 
 // NetAssistantAppNew create new instance
@@ -61,9 +64,9 @@ func NetAssistantAppNew() *NetAssistantApp {
 func (app *NetAssistantApp) update(recvStr string) {
 	list := []string{}
 	if app.cbHexDisplay.GetActive() {
-		for i, ch := range recvStr {
-			log.Println(i, ch)
-			list = append(list, fmt.Sprintf("%X", ch))
+		for i := 0; i < len(recvStr); i++ {
+			log.Println(i, recvStr[i])
+			list = append(list, fmt.Sprintf("%X", recvStr[i]))
 		}
 		recvStr = strings.Join(list, " ")
 	}
@@ -100,7 +103,7 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 			for index, connItem := range app.connList {
 				if conn.LocalAddr().String() == connItem.LocalAddr().String() {
 					app.connList = append(app.connList[:index], app.connList[index+1:]...)
-					log.Println("已经踢了")
+					log.Println("已经将无效的连接移除")
 				}
 			}
 			return
@@ -278,10 +281,78 @@ func (app *NetAssistantApp) onBtnSend() {
 	start, end := buff.GetBounds()
 	data, _ := buff.GetText(start, end, true)
 
-	for _, conn := range app.connList {
-		conn.Write([]byte(data))
-		fmt.Println("Write data", data)
-		app.updateSendCount(len([]byte(data)))
+	sendData := []byte(data)
+
+	if app.cbSendByHex.GetActive() {
+		data = strings.Replace(data, " ", "", -1)
+		data = strings.Replace(data, "\n", "", -1)
+		hexData, err := hex.DecodeString(data)
+		if err != nil {
+			log.Println(err)
+			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
+			app.labelStatus.SetMarkup(strTips)
+		} else {
+			sendData = hexData
+		}
+		log.Println(hexData)
+	}
+
+	label, err := app.btnSend.GetLabel()
+	if label != "Send" {
+		app.chanClose <- true
+		app.btnSend.SetLabel("Send")
+		return
+	}
+
+	if app.cbDataSourceCycleSend.GetActive() {
+		// 数据是否循环发送
+		app.btnSend.SetLabel("Stop")
+		strCycleTime, err := app.entryCycleTime.GetText()
+		if err != nil {
+			strCycleTime = "1000"
+		}
+		cycle, err := strconv.Atoi(strCycleTime)
+		if err != nil {
+			cycle = 1000
+		}
+		go func(cycleTime int) {
+		END:
+			for {
+				select {
+				case <-app.chanClose:
+					break END
+				default:
+					for _, conn := range app.connList {
+						conn.Write(sendData)
+						fmt.Println("Write data", data)
+						app.updateSendCount(len(sendData))
+					}
+					if len(app.connList) == 0 {
+
+						glib.IdleAdd(func() {
+							app.labelStatus.SetText("没有TCP连接了")
+							app.btnSend.SetLabel("Send")
+						})
+						break END
+
+					}
+				}
+				time.Sleep(time.Duration(cycleTime) * time.Millisecond)
+			}
+
+		}(cycle)
+	} else {
+
+		for _, conn := range app.connList {
+			conn.Write(sendData)
+			fmt.Println("Write data", data)
+			app.updateSendCount(len(sendData))
+		}
+
+	}
+
+	if app.cbAutoCleanAfterSend.GetActive() {
+		buff.SetText("")
 	}
 
 }
@@ -368,17 +439,20 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	// 发送设置
 	frame2ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	enabelFileSourceCb, _ := gtk.CheckButtonNewWithLabel("启用文件数据源发送")
-	autoCleanAfterSendCb, _ := gtk.CheckButtonNewWithLabel("发送完自动清空")
-	sendByHexCb, _ := gtk.CheckButtonNewWithLabel("按十六进制发送")
-	dataSourceCycleSendCb, _ := gtk.CheckButtonNewWithLabel("数据源循环发送")
+	app.cbAutoCleanAfterSend, _ = gtk.CheckButtonNewWithLabel("发送完自动清空")
+	app.cbSendByHex, _ = gtk.CheckButtonNewWithLabel("按十六进制发送")
+	app.cbDataSourceCycleSend, _ = gtk.CheckButtonNewWithLabel("数据源循环发送")
+	app.entryCycleTime, _ = gtk.EntryNew()
+	app.entryCycleTime.SetPlaceholderText("间隔毫秒，默认1000")
 	btnHboxContainer2, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	loadDataBtn, _ := gtk.ButtonNewWithLabel("加载数据")
 	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
 
 	frame2ContentBox.PackStart(enabelFileSourceCb, false, false, 0)
-	frame2ContentBox.PackStart(autoCleanAfterSendCb, false, false, 0)
-	frame2ContentBox.PackStart(sendByHexCb, false, false, 0)
-	frame2ContentBox.PackStart(dataSourceCycleSendCb, false, false, 0)
+	frame2ContentBox.PackStart(app.cbAutoCleanAfterSend, false, false, 0)
+	frame2ContentBox.PackStart(app.cbSendByHex, false, false, 0)
+	frame2ContentBox.PackStart(app.cbDataSourceCycleSend, false, false, 0)
+	frame2ContentBox.PackStart(app.entryCycleTime, false, false, 0)
 	btnHboxContainer2.PackStart(loadDataBtn, true, false, 0)
 	btnHboxContainer2.PackStart(app.btnClearSendDisplay, true, false, 0)
 	frame2ContentBox.PackStart(btnHboxContainer2, false, false, 0)
@@ -417,11 +491,12 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	bottomContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	scrollerDataSend, _ := gtk.ScrolledWindowNew(nil, nil)
 	app.tvDataSend, _ = gtk.TextViewNew()
+	app.tvDataSend.SetWrapMode(gtk.WRAP_CHAR)
 
 	scrollerDataSend.Add(app.tvDataSend)
 	scrollerDataSend.SetSizeRequest(-1, 180)
 	boxSendBtn, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
-	app.btnSend, _ = gtk.ButtonNewWithLabel("发送")
+	app.btnSend, _ = gtk.ButtonNewWithLabel("Send")
 	app.btnSend.Connect("clicked", app.onBtnSend)
 	boxSendBtn.PackEnd(app.btnSend, false, false, 0)
 	app.btnSend.SetSizeRequest(80, -1)
