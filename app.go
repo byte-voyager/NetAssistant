@@ -543,7 +543,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 func main() {
 
-	const appID = "org.gtk.example"
+	const appID = "com.github.baloneo"
 	application, err := gtk.ApplicationNew(appID, glib.APPLICATION_NON_UNIQUE)
 
 	if err != nil {
