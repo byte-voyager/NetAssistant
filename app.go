@@ -447,6 +447,10 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	btnHboxContainer2, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	loadDataBtn, _ := gtk.ButtonNewWithLabel("加载数据")
 	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
+	app.btnClearSendDisplay.Connect("clicked", func() {
+		buff, _ := app.tvDataSend.GetBuffer()
+		buff.SetText("")
+	})
 
 	frame2ContentBox.PackStart(enabelFileSourceCb, false, false, 0)
 	frame2ContentBox.PackStart(app.cbAutoCleanAfterSend, false, false, 0)
@@ -508,9 +512,9 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.labelStatus, _ = gtk.LabelNew("")
 	app.labelStatus.SetMarkup(`<span foreground="green" size="x-large" >😎</span>`)
 	windowContainerBottom.PackStart(app.labelStatus, true, false, 0)
-	app.labelSendCount, _ = gtk.LabelNew("发送计数 0")
+	app.labelSendCount, _ = gtk.LabelNew("发送计数：0")
 	windowContainerBottom.PackStart(app.labelSendCount, true, false, 0)
-	app.labelReceveCount, _ = gtk.LabelNew("接收计数 0")
+	app.labelReceveCount, _ = gtk.LabelNew("接收计数：0")
 	windowContainerBottom.PackStart(app.labelReceveCount, true, false, 0)
 	app.btnCleanCount, _ = gtk.ButtonNewWithLabel("复位计数")
 	app.btnCleanCount.Connect("clicked", app.onBtnCleanCount)
