@@ -327,7 +327,7 @@ func (app *NetAssistantApp) disconnect(serverType int) error {
 
 	if serverType == 3 {
 		app.labelLocalAddr.SetLabel("当前地址")
-		app.labelLocalPort.SetLabel("当前地址")
+		app.labelLocalPort.SetLabel("当前端口")
 		app.entryCurAddr.SetEditable(false)
 		app.entryCurAddr.SetText("")
 		app.entryCurPort.SetEditable(false)
