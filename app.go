@@ -22,7 +22,6 @@ type NetAssistantApp struct {
 	sendCount int
 
 	chanClose chan bool
-	chanData  chan string
 	listener  net.Listener
 	connList  []net.Conn
 	fileName  string
@@ -56,13 +55,14 @@ type NetAssistantApp struct {
 	cbReceive2File        *gtk.CheckButton       // 接收转向文件
 	btnSaveData           *gtk.Button            // 保存数据到文件
 	btnLoadData           *gtk.Button            // 从文件加载数据按钮
+	labelLocalAddr        *gtk.Label
+	labelLocalPort        *gtk.Label
 }
 
 // NetAssistantAppNew create new instance
 func NetAssistantAppNew() *NetAssistantApp {
 	obj := &NetAssistantApp{}
 	obj.chanClose = make(chan bool)
-	obj.chanData = make(chan string)
 	return obj
 }
 
@@ -86,7 +86,6 @@ func (app *NetAssistantApp) getRecvData() string {
 	if err != nil {
 		log.Println(err)
 		return ""
-
 	}
 	return data
 }
@@ -133,9 +132,16 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 		n, err := reader.Read(buf[:]) // 读取数据
 		if err != nil {
 			log.Println("从客户端读取数据异常，关闭此连接:", err)
-			ss := conn.RemoteAddr().String()
-			tips := fmt.Sprintf(`<span foreground="pink">😄 connection close: %s </span>`, ss)
-			app.labelStatus.SetMarkup(tips)
+			_, ok := conn.(net.Conn)
+			if !ok {
+				log.Println("不是net.Conn")
+				ss := conn.RemoteAddr().String()
+				tips := fmt.Sprintf(`<span foreground="pink">😄 connection close: %s </span>`, ss)
+				glib.IdleAdd(func() {
+					app.labelStatus.SetMarkup(tips)
+				})
+			}
+
 			for index, connItem := range app.connList {
 				if conn.LocalAddr().String() == connItem.LocalAddr().String() {
 					app.connList = append(app.connList[:index], app.connList[index+1:]...)
@@ -153,49 +159,8 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 	}
 }
 
-func (app *NetAssistantApp) createTCPClient(address string) (net.Conn, error) {
-	conn, err := net.Dial("tcp", address)
-	if err != nil {
-		return nil, err
-	}
-	strAddr := conn.LocalAddr().String()
-	arr := strings.Split(strAddr, ":")
-	app.entryCurPort.SetText(arr[1])
-	app.entryCurAddr.SetText(arr[0])
-
-	go app.handler(conn)
-	return conn, nil
-}
-
 func init() {
 	log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
-}
-
-func (app *NetAssistantApp) createTCPServer(addr string) (net.Listener, error) {
-	listen, err := net.Listen("tcp", addr)
-
-	if err != nil {
-		log.Println("listen failed, err:", err)
-		return nil, err
-	}
-
-	go func() {
-		for {
-			conn, err := listen.Accept() // 等待客户端
-			if err != nil {
-				log.Println("accept 失败, err:", err, "退出监听")
-				return
-			}
-			ss := conn.RemoteAddr().String()
-			tips := fmt.Sprintf(`<span foreground="green">😄 New connection: %s </span>`, ss)
-			app.labelStatus.SetMarkup(tips)
-			app.connList = append(app.connList, conn)
-			go app.handler(conn)
-		}
-
-	}()
-
-	return listen, nil
 }
 
 func (app *NetAssistantApp) onBtnCleanCount() {
@@ -216,7 +181,6 @@ func (app *NetAssistantApp) onCbReceive2File() {
 		}
 		dialog.Destroy()
 	}
-
 }
 
 func (app *NetAssistantApp) onBtnLoadData() {
@@ -246,88 +210,133 @@ func (app *NetAssistantApp) onBtnSaveData() {
 	dialog.Destroy()
 }
 
-func (app *NetAssistantApp) connectOrDisconectServer(isDisconnect bool, host, port string) {
-	if !isDisconnect {
-		log.Println("开始监听")
-		if app.listener != nil {
-			app.listener.Close()
-		}
-		listener, err := app.createTCPServer(host + ":" + port)
-
-		if err != nil {
-			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
-			app.labelStatus.SetMarkup(strTips)
-		} else {
-			app.listener = listener
-			strTips := `<span size="x-large" foreground="green">😄</span>`
-			app.labelStatus.SetMarkup(strTips)
-			app.btnConnect.SetLabel("Disconnect")
-			app.entryCurPort.SetText(port)
-			app.entryCurAddr.SetText(host)
-			app.combProtoType.SetSensitive(false)
-		}
-	} else {
-		log.Println("断开监听")
-		if app.listener != nil {
-			app.listener.Close()
-			app.listener = nil
-			for _, conn := range app.connList {
-				conn.Close()
-			}
-			app.connList = []net.Conn{}
-
-		}
-		strTips := `<span foreground="green" size="x-large" >😎</span>`
-		app.labelStatus.SetMarkup(strTips)
-		app.btnConnect.SetLabel("Connect")
-		app.entryCurAddr.SetText("")
-		app.entryCurPort.SetText("")
-		app.combProtoType.SetSensitive(true)
-	}
-
+func (app *NetAssistantApp) addConnection(conn net.Conn) {
+	app.connList = append(app.connList, conn)
 }
 
-func (app *NetAssistantApp) connectOrDisconectClient(isDisconnect bool, host, port string) {
-	if !isDisconnect {
-		log.Println("连接客户端")
-		if len(app.connList) != 0 {
-			for _, conn := range app.connList {
-				conn.Close()
-			}
-			app.connList = []net.Conn{}
-		}
-		conn, err := app.createTCPClient(host + ":" + port)
+func (app *NetAssistantApp) updateStatus(msg string) {
+	app.labelStatus.SetMarkup(msg)
+}
 
-		if err != nil {
-			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
-			app.labelStatus.SetMarkup(strTips)
+func (app *NetAssistantApp) updateAllStatus(msg, curIP, curPort string) {
+	app.labelStatus.SetMarkup(msg)
+	app.entryCurAddr.SetText(curIP)
+	app.entryCurPort.SetText(curPort)
+}
+
+func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string) error {
+	addr := strIP + ":" + strPort
+	if serverType == 0 { // TCP Client
+		conn, err := net.Dial("tcp", addr) // 创建连接
+		if err == nil {
+			go app.handler(conn)    // 监听数据
+			app.addConnection(conn) // 加到连接列表
+			locallConnInfo := strings.Split(conn.LocalAddr().String(), ":")
+			app.updateAllStatus("TCP Client连接成功", locallConnInfo[0], locallConnInfo[1])
+
 		} else {
-			app.connList = append(app.connList, conn)
-			strTips := `<span size="x-large" foreground="green">😄</span>`
-			app.labelStatus.SetMarkup(strTips)
-			app.btnConnect.SetLabel("Disconnect")
-			ss := conn.LocalAddr().String()
-			ssArr := strings.Split(ss, ":")
-			app.entryCurAddr.SetText(ssArr[0])
-			app.entryCurPort.SetText(ssArr[1])
-			app.combProtoType.SetSensitive(false)
+			app.updateAllStatus("TCP Client连接失败："+err.Error(), "", "")
+			return err
 		}
-	} else {
-		log.Println("断开客户端")
 
-		for _, conn := range app.connList {
-			conn.Close()
-		}
-		app.connList = []net.Conn{}
-		log.Println("清空连接")
-
-		strTips := `<span foreground="green" size="x-large" >😎</span>`
-		app.labelStatus.SetMarkup(strTips)
-		app.btnConnect.SetLabel("Connect")
-		app.entryCurAddr.SetText("")
-		app.entryCurPort.SetText("")
-		app.combProtoType.SetSensitive(true)
 	}
+	if serverType == 1 { // TCP Server
+		listen, err := net.Listen("tcp", addr)
+
+		if err == nil {
+			log.Println("listen failed, err:", err)
+			app.updateStatus("TCP Server连接成功")
+			go func() {
+				for {
+					conn, err := listen.Accept() // 等待客户端
+					if err != nil {
+						log.Println("accept 失败, err:", err, "退出监听")
+						return
+					}
+					ss := conn.RemoteAddr().String()
+					tips := fmt.Sprintf(`<span foreground="green">新的连接:%s </span>`, ss)
+					glib.IdleAdd(func() {
+						app.labelStatus.SetMarkup(tips)
+					})
+
+					app.connList = append(app.connList, conn)
+					go app.handler(conn)
+				}
+			}()
+
+			app.updateAllStatus("TCP Server连接成功", strIP, strPort)
+
+			app.listener = listen
+		} else {
+			app.updateStatus("TCP Server连接失败：" + err.Error())
+			return err
+		}
+	}
+
+	if serverType == 2 { // UDP Client
+		conn, err := net.Dial("udp4", addr)
+		if err == nil {
+			go app.handler(conn)
+			app.addConnection(conn)
+			localConnInfo := strings.Split(conn.LocalAddr().String(), ":")
+			app.updateAllStatus("UDP Client连接成功", localConnInfo[0], localConnInfo[1])
+		} else {
+			app.updateStatus("UDP Client连接失败：" + err.Error())
+			return err
+		}
+
+	}
+
+	if serverType == 3 { // UDP Server
+		address, err := net.ResolveUDPAddr("udp4", addr)
+		if err != nil {
+			app.updateStatus("UDP Server连接失败：" + err.Error())
+		} else {
+			udpConn, err := net.ListenUDP("udp4", address)
+			if err == nil {
+				go app.handler(udpConn)
+				app.addConnection(udpConn)
+				localConnInfo := strings.Split(udpConn.LocalAddr().String(), ":")
+				app.updateAllStatus("UDP Server连接成功", localConnInfo[0], localConnInfo[1])
+				app.labelLocalAddr.SetLabel("目标UDP地址")
+				app.labelLocalPort.SetLabel("目标UDP端口")
+				app.entryCurAddr.SetEditable(true)
+				app.entryCurAddr.SetText("")
+				app.entryCurPort.SetEditable(true)
+				app.entryCurPort.SetText("")
+			} else {
+				app.updateStatus("UDP Server连接失败：" + err.Error())
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (app *NetAssistantApp) disconnect(serverType int) error {
+	if serverType == 1 {
+		if app.listener != nil {
+			app.listener.Close()
+		}
+	}
+
+	for _, conn := range app.connList {
+		conn.Close()
+	}
+
+	if serverType == 3 {
+		app.labelLocalAddr.SetLabel("当前地址")
+		app.labelLocalPort.SetLabel("当前地址")
+		app.entryCurAddr.SetEditable(false)
+		app.entryCurAddr.SetText("")
+		app.entryCurPort.SetEditable(false)
+		app.entryCurPort.SetText("")
+	}
+
+	app.updateStatus("等待连接")
+	app.connList = []net.Conn{}
+	return nil
 }
 
 func (app *NetAssistantApp) onBtnConnect(button *gtk.Button) {
@@ -338,13 +347,16 @@ func (app *NetAssistantApp) onBtnConnect(button *gtk.Button) {
 
 	label, _ := app.btnConnect.GetLabel()
 	isDisconnect := label == "Disconnect"
-	if serverType == 1 {
-		app.connectOrDisconectServer(isDisconnect, strIP, strPort)
 
-	} else if serverType == 0 {
-		app.connectOrDisconectClient(isDisconnect, strIP, strPort)
+	if isDisconnect {
+		if err := app.disconnect(serverType); err == nil {
+			app.btnConnect.SetLabel("Connect")
+		}
+	} else {
+		if err := app.createConnect(serverType, strIP, strPort); err == nil {
+			app.btnConnect.SetLabel("Disconnect")
+		}
 	}
-
 }
 
 func (app *NetAssistantApp) onBtnSend() {
@@ -365,7 +377,7 @@ func (app *NetAssistantApp) onBtnSend() {
 		hexData, err := hex.DecodeString(data)
 		if err != nil {
 			log.Println(err)
-			strTips := fmt.Sprintf(`<span foreground="red">😱 %s</span>`, err)
+			strTips := fmt.Sprintf(`<span foreground="red">😱%s</span>`, err)
 			app.labelStatus.SetMarkup(strTips)
 		} else {
 			sendData = hexData
@@ -399,9 +411,20 @@ func (app *NetAssistantApp) onBtnSend() {
 					break END
 				default:
 					for _, conn := range app.connList {
-						conn.Write(sendData)
-						log.Println("Write data:", data)
-						app.updateSendCount(len(sendData))
+						if cc, ok := conn.(*net.UDPConn); ok {
+							strIP, _ := app.entryCurAddr.GetText()
+							strPort, _ := app.entryCurPort.GetText()
+							address, err := net.ResolveUDPAddr("udp4", strIP+":"+strPort)
+							if err == nil {
+								log.Println("是udp")
+								cc.WriteToUDP(sendData, address)
+							} else {
+								log.Println("udp目标地址解析错误")
+							}
+
+						} else {
+							conn.Write(sendData)
+						}
 					}
 					if len(app.connList) == 0 {
 
@@ -410,7 +433,6 @@ func (app *NetAssistantApp) onBtnSend() {
 							app.btnSend.SetLabel("Send")
 						})
 						break END
-
 					}
 				}
 				time.Sleep(time.Duration(cycleTime) * time.Millisecond)
@@ -420,7 +442,18 @@ func (app *NetAssistantApp) onBtnSend() {
 	} else {
 
 		for _, conn := range app.connList {
-			conn.Write(sendData)
+
+			if cc, ok := conn.(*net.UDPConn); ok {
+				strIP, _ := app.entryCurAddr.GetText()
+				strPort, _ := app.entryCurPort.GetText()
+				address, err := net.ResolveUDPAddr("udp4", strIP+":"+strPort)
+				if err == nil {
+					cc.WriteToUDP(sendData, address)
+				}
+
+			} else {
+				conn.Write(sendData)
+			}
 			log.Println("Write data", data)
 			app.updateSendCount(len(sendData))
 		}
@@ -445,7 +478,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.appWindow.SetIconFromFile("./icon.png")
 
 	app.appWindow.SetBorderWidth(10)
-	app.appWindow.SetTitle("NetAssistant")
+	app.appWindow.SetTitle("网络调试助手")
 
 	// 总体容器
 	windowContainer, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
@@ -464,6 +497,8 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.combProtoType, _ = gtk.ComboBoxTextNew()
 	app.combProtoType.AppendText("TCP Client")
 	app.combProtoType.AppendText("TCP Server")
+	app.combProtoType.AppendText("UDP Client")
+	app.combProtoType.AppendText("UDP Server")
 	app.combProtoType.SetActive(0)
 	// 添加到容器
 	verticalBox.PackStart(labelProtType, false, false, 0)
@@ -558,15 +593,15 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.swDataRec.Add(app.tvDataReceive)
 	windowContainerRight.PackStart(app.swDataRec, true, true, 0)
 	middleContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
-	labelLocalAddr, _ := gtk.LabelNew("当前地址")
+	app.labelLocalAddr, _ = gtk.LabelNew("当前地址")
 	app.entryCurAddr, _ = gtk.EntryNew()
 	app.entryCurAddr.SetEditable(false)
-	labelLocalPort, _ := gtk.LabelNew("当前端口")
+	app.labelLocalPort, _ = gtk.LabelNew("当前端口")
 	app.entryCurPort, _ = gtk.EntryNew()
 	app.entryCurPort.SetEditable(false)
-	middleContainer.PackStart(labelLocalAddr, false, false, 0)
+	middleContainer.PackStart(app.labelLocalAddr, false, false, 0)
 	middleContainer.PackStart(app.entryCurAddr, false, false, 0)
-	middleContainer.PackStart(labelLocalPort, false, false, 0)
+	middleContainer.PackStart(app.labelLocalPort, false, false, 0)
 	middleContainer.PackStart(app.entryCurPort, false, false, 0)
 	windowContainerRight.PackStart(middleContainer, false, false, 0)
 	bottomContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
@@ -587,7 +622,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	// 最底下的布局
 	app.labelStatus, _ = gtk.LabelNew("")
-	app.labelStatus.SetMarkup(`<span foreground="green" size="x-large" >😎</span>`)
+	app.labelStatus.SetMarkup(`<span>等待连接</span>`)
 	windowContainerBottom.PackStart(app.labelStatus, true, false, 0)
 	app.labelSendCount, _ = gtk.LabelNew("发送计数：0")
 	windowContainerBottom.PackStart(app.labelSendCount, true, false, 0)

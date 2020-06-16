@@ -3,8 +3,8 @@
 ### 特性
 - [x] TCP Client
 - [x] TCP Server
-- [ ] UDP Client
-- [ ] UDP Server
+- [x] UDP Client
+- [x] UDP Server
 - [x] 接收转向文件
 - [x] 显示时间且换行
 - [x] 十六进制显示
