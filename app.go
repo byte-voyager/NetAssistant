@@ -235,7 +235,8 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 			app.updateAllStatus("TCP Client连接成功", locallConnInfo[0], locallConnInfo[1])
 
 		} else {
-			app.updateAllStatus("TCP Client连接失败："+err.Error(), "", "")
+			app.updateAllStatus(err.Error(), "", "")
+
 			return err
 		}
 
@@ -268,7 +269,7 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 
 			app.listener = listen
 		} else {
-			app.updateStatus("TCP Server连接失败：" + err.Error())
+			app.updateStatus(err.Error())
 			return err
 		}
 	}
@@ -281,7 +282,7 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 			localConnInfo := strings.Split(conn.LocalAddr().String(), ":")
 			app.updateAllStatus("UDP Client连接成功", localConnInfo[0], localConnInfo[1])
 		} else {
-			app.updateStatus("UDP Client连接失败：" + err.Error())
+			app.updateStatus(err.Error())
 			return err
 		}
 
@@ -305,7 +306,7 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 				app.entryCurPort.SetEditable(true)
 				app.entryCurPort.SetText("")
 			} else {
-				app.updateStatus("UDP Server连接失败：" + err.Error())
+				app.updateStatus(err.Error())
 				return err
 			}
 		}
@@ -559,7 +560,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	app.entryCycleTime.SetPlaceholderText("间隔毫秒，默认1000")
 	btnHboxContainer2, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	app.btnLoadData, _ = gtk.ButtonNewWithLabel("加载数据")
-	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
+	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("清空发送")
 	app.btnLoadData.Connect("clicked", app.onBtnLoadData)
 	app.btnClearSendDisplay.Connect("clicked", func() {
 		buff, _ := app.tvDataSend.GetBuffer()
