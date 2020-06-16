@@ -412,7 +412,7 @@ func (app *NetAssistantApp) onBtnSend() {
 					break END
 				default:
 					for _, conn := range app.connList {
-						if cc, ok := conn.(*net.UDPConn); ok {
+						if cc, ok := conn.(*net.UDPConn); ok && app.combProtoType.GetActive() == 3 {
 							strIP, _ := app.entryCurAddr.GetText()
 							strPort, _ := app.entryCurPort.GetText()
 							address, err := net.ResolveUDPAddr("udp4", strIP+":"+strPort)
@@ -444,7 +444,7 @@ func (app *NetAssistantApp) onBtnSend() {
 
 		for _, conn := range app.connList {
 
-			if cc, ok := conn.(*net.UDPConn); ok {
+			if cc, ok := conn.(*net.UDPConn); ok && app.combProtoType.GetActive() == 3 {
 				strIP, _ := app.entryCurAddr.GetText()
 				strPort, _ := app.entryCurPort.GetText()
 				address, err := net.ResolveUDPAddr("udp4", strIP+":"+strPort)
