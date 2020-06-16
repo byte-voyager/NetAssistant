@@ -132,11 +132,11 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 		n, err := reader.Read(buf[:]) // 读取数据
 		if err != nil {
 			log.Println("从客户端读取数据异常，关闭此连接:", err)
-			_, ok := conn.(net.Conn)
+			_, ok := conn.(*net.UDPConn)
 			if !ok {
-				log.Println("不是net.Conn")
+				log.Println("不是net.UDPConn")
 				ss := conn.RemoteAddr().String()
-				tips := fmt.Sprintf(`<span foreground="pink">😄 connection close: %s </span>`, ss)
+				tips := fmt.Sprintf(`<span foreground="pink">😄连接被关闭: %s </span>`, ss)
 				glib.IdleAdd(func() {
 					app.labelStatus.SetMarkup(tips)
 				})
@@ -657,7 +657,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 func main() {
 
-	const appID = "com.github.baloneo"
+	const appID = "com.github.baloneo.netassistant"
 	application, err := gtk.ApplicationNew(appID, glib.APPLICATION_NON_UNIQUE)
 
 	if err != nil {
