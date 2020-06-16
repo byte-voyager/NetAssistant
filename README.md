@@ -1,5 +1,5 @@
 # 网络调试助手
-
+基于Gtk3的Go语言绑定实现。
 ### 特性
 - [x] TCP Client
 - [x] TCP Server
