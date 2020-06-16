@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -24,6 +25,7 @@ type NetAssistantApp struct {
 	chanData  chan string
 	listener  net.Listener
 	connList  []net.Conn
+	fileName  string
 
 	appWindow             *gtk.ApplicationWindow // app 主窗口
 	combProtoType         *gtk.ComboBoxText      // 服务类型下拉框
@@ -51,6 +53,9 @@ type NetAssistantApp struct {
 	tbSendData            *gtk.TextBuffer        // 发送区buffer
 	entryCycleTime        *gtk.Entry             // 持续发送数据的间隔
 	cbAutoCleanAfterSend  *gtk.CheckButton       // 发送后清空
+	cbReceive2File        *gtk.CheckButton       // 接收转向文件
+	btnSaveData           *gtk.Button            // 保存数据到文件
+	btnLoadData           *gtk.Button            // 从文件加载数据按钮
 }
 
 // NetAssistantAppNew create new instance
@@ -59,6 +64,31 @@ func NetAssistantAppNew() *NetAssistantApp {
 	obj.chanClose = make(chan bool)
 	obj.chanData = make(chan string)
 	return obj
+}
+
+func appendConntent2File(filename string, content []byte) {
+	fd, _ := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	defer fd.Close()
+
+	fd.Write(content)
+
+}
+
+func (app *NetAssistantApp) getRecvData() string {
+	buff, err := app.tvDataReceive.GetBuffer()
+	if err != nil {
+		log.Println(err)
+		return ""
+
+	}
+	start, end := buff.GetBounds()
+	data, err := buff.GetText(start, end, true)
+	if err != nil {
+		log.Println(err)
+		return ""
+
+	}
+	return data
 }
 
 func (app *NetAssistantApp) update(recvStr string) {
@@ -74,6 +104,12 @@ func (app *NetAssistantApp) update(recvStr string) {
 	if app.cbDisplayDate.GetActive() {
 		recvStr = fmt.Sprintf("[%s]:%s\n", time.Now().Format("2006-01-02 15:04:05"), recvStr)
 	}
+
+	if app.cbReceive2File.GetActive() {
+		appendConntent2File(app.fileName, []byte(recvStr))
+		return
+	}
+
 	iter := app.tbReceData.GetEndIter()
 	app.tbReceData.Insert(iter, recvStr)
 	app.labelReceveCount.SetText("接收计数：" + strconv.Itoa(app.receCount))
@@ -96,7 +132,7 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 		var buf [2048]byte
 		n, err := reader.Read(buf[:]) // 读取数据
 		if err != nil {
-			fmt.Println("从客户端读取数据异常，关闭此连接:", err)
+			log.Println("从客户端读取数据异常，关闭此连接:", err)
 			ss := conn.RemoteAddr().String()
 			tips := fmt.Sprintf(`<span foreground="pink">😄 connection close: %s </span>`, ss)
 			app.labelStatus.SetMarkup(tips)
@@ -169,6 +205,47 @@ func (app *NetAssistantApp) onBtnCleanCount() {
 	app.labelSendCount.SetText("发送计数：0")
 }
 
+// onCbReceive2File 点击接收转向文件时调用
+func (app *NetAssistantApp) onCbReceive2File() {
+	if app.cbReceive2File.GetActive() {
+		dialog, _ := gtk.FileChooserNativeDialogNew("Select File", app.appWindow, gtk.FILE_CHOOSER_ACTION_OPEN, "Select", "Cancel")
+		res := dialog.Run()
+		if res == int(gtk.RESPONSE_ACCEPT) {
+			fileName := dialog.FileChooser.GetFilename()
+			app.fileName = fileName
+		}
+		dialog.Destroy()
+	}
+
+}
+
+func (app *NetAssistantApp) onBtnLoadData() {
+	log.Println("btn load data")
+	dialog, _ := gtk.FileChooserNativeDialogNew("Select File", app.appWindow, gtk.FILE_CHOOSER_ACTION_OPEN, "Select", "Cancel")
+	res := dialog.Run()
+	if res == int(gtk.RESPONSE_ACCEPT) {
+		fileName := dialog.FileChooser.GetFilename()
+		data, err := ioutil.ReadFile(fileName)
+		if err != nil {
+			log.Println(err)
+		} else {
+			buf, _ := app.tvDataSend.GetBuffer()
+			buf.SetText(string(data))
+		}
+	}
+	dialog.Destroy()
+}
+
+func (app *NetAssistantApp) onBtnSaveData() {
+	dialog, _ := gtk.FileChooserNativeDialogNew("Save File", app.appWindow, gtk.FILE_CHOOSER_ACTION_SAVE, "Save", "Cancel")
+	res := dialog.Run()
+	if res == int(gtk.RESPONSE_ACCEPT) {
+		fileName := dialog.FileChooser.GetFilename()
+		appendConntent2File(fileName, []byte(app.getRecvData()))
+	}
+	dialog.Destroy()
+}
+
 func (app *NetAssistantApp) connectOrDisconectServer(isDisconnect bool, host, port string) {
 	if !isDisconnect {
 		log.Println("开始监听")
@@ -198,7 +275,6 @@ func (app *NetAssistantApp) connectOrDisconectServer(isDisconnect bool, host, po
 				conn.Close()
 			}
 			app.connList = []net.Conn{}
-			fmt.Println("清空连接")
 
 		}
 		strTips := `<span foreground="green" size="x-large" >😎</span>`
@@ -275,7 +351,7 @@ func (app *NetAssistantApp) onBtnSend() {
 
 	buff, err := app.tvDataSend.GetBuffer()
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 
 	start, end := buff.GetBounds()
@@ -324,7 +400,7 @@ func (app *NetAssistantApp) onBtnSend() {
 				default:
 					for _, conn := range app.connList {
 						conn.Write(sendData)
-						fmt.Println("Write data", data)
+						log.Println("Write data:", data)
 						app.updateSendCount(len(sendData))
 					}
 					if len(app.connList) == 0 {
@@ -345,7 +421,7 @@ func (app *NetAssistantApp) onBtnSend() {
 
 		for _, conn := range app.connList {
 			conn.Write(sendData)
-			fmt.Println("Write data", data)
+			log.Println("Write data", data)
 			app.updateSendCount(len(sendData))
 		}
 
@@ -418,18 +494,20 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	// 接收设置
 	frame1ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
-	cbReceive2File, _ := gtk.CheckButtonNewWithLabel("接收转向文件")
+	app.cbReceive2File, _ = gtk.CheckButtonNewWithLabel("接收转向文件")
+	app.cbReceive2File.Connect("toggled", app.onCbReceive2File)
 	app.cbDisplayDate, _ = gtk.CheckButtonNewWithLabel("显示时间且换行")
 	app.cbHexDisplay, _ = gtk.CheckButtonNewWithLabel("十六进制显示")
 	app.cbPauseDisplay, _ = gtk.CheckButtonNewWithLabel("暂停接收")
 	btnHboxContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
-	saveDataCb, _ := gtk.ButtonNewWithLabel("保存数据")
+	app.btnSaveData, _ = gtk.ButtonNewWithLabel("保存数据")
+	app.btnSaveData.Connect("clicked", app.onBtnSaveData)
 	app.btnClearRecvDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
 	app.btnClearRecvDisplay.Connect("clicked", app.onBtnClearRecvDisplay)
 
-	btnHboxContainer.PackStart(saveDataCb, true, false, 0)
+	btnHboxContainer.PackStart(app.btnSaveData, true, false, 0)
 	btnHboxContainer.PackStart(app.btnClearRecvDisplay, true, false, 0)
-	frame1ContentBox.PackStart(cbReceive2File, false, false, 0)
+	frame1ContentBox.PackStart(app.cbReceive2File, false, false, 0)
 	frame1ContentBox.PackStart(app.cbDisplayDate, false, false, 0)
 	frame1ContentBox.PackStart(app.cbHexDisplay, false, false, 0)
 	frame1ContentBox.PackStart(app.cbPauseDisplay, false, false, 0)
@@ -438,26 +516,25 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	// 发送设置
 	frame2ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
-	enabelFileSourceCb, _ := gtk.CheckButtonNewWithLabel("启用文件数据源发送")
 	app.cbAutoCleanAfterSend, _ = gtk.CheckButtonNewWithLabel("发送完自动清空")
 	app.cbSendByHex, _ = gtk.CheckButtonNewWithLabel("按十六进制发送")
 	app.cbDataSourceCycleSend, _ = gtk.CheckButtonNewWithLabel("数据源循环发送")
 	app.entryCycleTime, _ = gtk.EntryNew()
 	app.entryCycleTime.SetPlaceholderText("间隔毫秒，默认1000")
 	btnHboxContainer2, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
-	loadDataBtn, _ := gtk.ButtonNewWithLabel("加载数据")
+	app.btnLoadData, _ = gtk.ButtonNewWithLabel("加载数据")
 	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("清空显示")
+	app.btnLoadData.Connect("clicked", app.onBtnLoadData)
 	app.btnClearSendDisplay.Connect("clicked", func() {
 		buff, _ := app.tvDataSend.GetBuffer()
 		buff.SetText("")
 	})
 
-	frame2ContentBox.PackStart(enabelFileSourceCb, false, false, 0)
 	frame2ContentBox.PackStart(app.cbAutoCleanAfterSend, false, false, 0)
 	frame2ContentBox.PackStart(app.cbSendByHex, false, false, 0)
 	frame2ContentBox.PackStart(app.cbDataSourceCycleSend, false, false, 0)
 	frame2ContentBox.PackStart(app.entryCycleTime, false, false, 0)
-	btnHboxContainer2.PackStart(loadDataBtn, true, false, 0)
+	btnHboxContainer2.PackStart(app.btnLoadData, true, false, 0)
 	btnHboxContainer2.PackStart(app.btnClearSendDisplay, true, false, 0)
 	frame2ContentBox.PackStart(btnHboxContainer2, false, false, 0)
 	frame2ContentBox.SetBorderWidth(10)
