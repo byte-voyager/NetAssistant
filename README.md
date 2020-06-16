@@ -17,7 +17,7 @@
 - [x] 数据源循环发送
 
 ### 运行本项目
-从relase下载`baloneo.netassistant`二进制文件，增加可执行权限，直接运行即可。
+从release下载`baloneo.netassistant`二进制文件，增加可执行权限，直接运行即可。
 
 ### 构建本项目
 ```

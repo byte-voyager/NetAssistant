@@ -362,6 +362,7 @@ func (app *NetAssistantApp) onBtnConnect(button *gtk.Button) {
 }
 
 func (app *NetAssistantApp) onBtnSend() {
+	``
 
 	buff, err := app.tvDataSend.GetBuffer()
 	if err != nil {
