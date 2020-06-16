@@ -351,10 +351,12 @@ func (app *NetAssistantApp) onBtnConnect(button *gtk.Button) {
 	if isDisconnect {
 		if err := app.disconnect(serverType); err == nil {
 			app.btnConnect.SetLabel("Connect")
+			app.combProtoType.SetSensitive(true)
 		}
 	} else {
 		if err := app.createConnect(serverType, strIP, strPort); err == nil {
 			app.btnConnect.SetLabel("Disconnect")
+			app.combProtoType.SetSensitive(false)
 		}
 	}
 }
