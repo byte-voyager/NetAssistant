@@ -63,6 +63,7 @@ type NetAssistantApp struct {
 	btnLoadData           *gtk.Button            // 从文件加载数据按钮
 	labelLocalAddr        *gtk.Label
 	labelLocalPort        *gtk.Label
+	cbAppendNewLine       *gtk.CheckButton
 }
 
 // NetAssistantAppNew create new instance
@@ -377,6 +378,10 @@ func (app *NetAssistantApp) onBtnSend() {
 	start, end := buff.GetBounds()
 	data, _ := buff.GetText(start, end, true)
 
+	if app.cbAppendNewLine.GetActive() {
+		data += "\r\n"
+	}
+
 	sendData := []byte(data)
 
 	if app.cbSendByHex.GetActive() {
@@ -563,6 +568,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 
 	// 发送设置
 	frame2ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
+	app.cbAppendNewLine, _ = gtk.CheckButtonNewWithLabel("追加\\r\\n")
 	app.cbAutoCleanAfterSend, _ = gtk.CheckButtonNewWithLabel("发送完自动清空")
 	app.cbSendByHex, _ = gtk.CheckButtonNewWithLabel("按十六进制发送")
 	app.cbDataSourceCycleSend, _ = gtk.CheckButtonNewWithLabel("数据源循环发送")
@@ -577,6 +583,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 		buff.SetText("")
 	})
 
+	frame2ContentBox.PackStart(app.cbAppendNewLine, false, false, 0)
 	frame2ContentBox.PackStart(app.cbAutoCleanAfterSend, false, false, 0)
 	frame2ContentBox.PackStart(app.cbSendByHex, false, false, 0)
 	frame2ContentBox.PackStart(app.cbDataSourceCycleSend, false, false, 0)
