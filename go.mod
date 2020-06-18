@@ -1,4 +1,4 @@
-module baloneo.netassistant
+module baloneo.gtk
 
 go 1.14
 
