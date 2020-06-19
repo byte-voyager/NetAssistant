@@ -407,7 +407,7 @@ func (app *NetAssistantApp) onBtnSend() {
 		END:
 			for {
 				select {
-				case <-app.chanClose:
+				case <-app.chanClose: // waiting close
 					break END
 				default:
 					for _, conn := range app.connList { // range current connection
