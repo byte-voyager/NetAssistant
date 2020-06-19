@@ -663,7 +663,7 @@ func init() {
 		backend1Leveled.SetLevel(logging.DEBUG, "")
 		fmt.Println("NET_ASS_DEBUG", "on")
 	} else {
-		backend1Leveled.SetLevel(logging.ERROR, "")
+		backend1Leveled.SetLevel(logging.CRITICAL, "")
 	}
 }
 
