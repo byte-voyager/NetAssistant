@@ -506,7 +506,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	frame.SetLabelAlign(0.1, 0.5)
 	verticalBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10) //
 	frame.Add(verticalBox)
-	labelProtType, _ := gtk.LabelNew("Type Of Service")
+	labelProtType, _ := gtk.LabelNew("Type")
 	labelProtType.SetXAlign(0)
 	app.combProtoType, _ = gtk.ComboBoxTextNew()
 	app.combProtoType.AppendText("TCP Client")
