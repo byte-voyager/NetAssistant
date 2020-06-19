@@ -115,7 +115,6 @@ func (app *NetAssistantApp) update(recvStr string) {
 
 	if app.cbReceive2File.GetActive() {
 		appendConntent2File(app.fileName, []byte(recvStr))
-		return
 	}
 
 	iter := app.tbReceData.GetEndIter()
