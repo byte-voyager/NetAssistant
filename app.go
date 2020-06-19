@@ -393,7 +393,7 @@ func (app *NetAssistantApp) onBtnSend() {
 		return
 	}
 
-	if app.cbDataSourceCycleSend.GetActive() {
+	if app.cbDataSourceCycleSend.GetActive() { // loop send
 		app.btnSend.SetLabel("Stop")
 		strCycleTime, err := app.entryCycleTime.GetText()
 		if err != nil {
@@ -410,19 +410,19 @@ func (app *NetAssistantApp) onBtnSend() {
 				case <-app.chanClose:
 					break END
 				default:
-					for _, conn := range app.connList {
-						if cc, ok := conn.(*net.UDPConn); ok && app.combProtoType.GetActive() == 3 {
+					for _, conn := range app.connList { // range current connection
+						if udpConnection, ok := conn.(*net.UDPConn); ok && app.combProtoType.GetActive() == 3 { // if the connection is UDP
 							strIP, _ := app.entryCurAddr.GetText()
 							strPort, _ := app.entryCurPort.GetText()
 							address, err := net.ResolveUDPAddr("udp4", strIP+":"+strPort)
 							if err == nil {
-								cc.WriteToUDP(sendData, address)
+								udpConnection.WriteToUDP(sendData, address) // send udp message
 							} else {
 								log.Error(err)
 							}
 
 						} else {
-							conn.Write(sendData)
+							conn.Write(sendData) // send message
 						}
 					}
 					if len(app.connList) == 0 {
@@ -436,7 +436,7 @@ func (app *NetAssistantApp) onBtnSend() {
 				time.Sleep(time.Duration(cycleTime) * time.Millisecond)
 			}
 		}(cycle)
-	} else {
+	} else { // once send
 		for _, conn := range app.connList {
 			if cc, ok := conn.(*net.UDPConn); ok && app.combProtoType.GetActive() == 3 {
 				strIP, _ := app.entryCurAddr.GetText()
@@ -452,6 +452,7 @@ func (app *NetAssistantApp) onBtnSend() {
 			app.updateSendCount(len(sendData))
 		}
 	}
+
 	if app.cbAutoCleanAfterSend.GetActive() {
 		buff.SetText("")
 	}
