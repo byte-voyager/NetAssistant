@@ -123,6 +123,7 @@ func (app *NetAssistantApp) update(recvStr string) {
 	mark := app.tbReceData.GetMark("end")
 
 	app.tvDataReceive.ScrollMarkOnscreen(mark)
+
 }
 
 func (app *NetAssistantApp) updateSendCount(count int) {
