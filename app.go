@@ -76,9 +76,7 @@ func NetAssistantAppNew() *NetAssistantApp {
 func appendConntent2File(filename string, content []byte) {
 	fd, _ := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	defer fd.Close()
-
 	fd.Write(content)
-
 }
 
 func (app *NetAssistantApp) getRecvData() string {
@@ -86,8 +84,8 @@ func (app *NetAssistantApp) getRecvData() string {
 	if err != nil {
 		log.Println(err)
 		return ""
-
 	}
+
 	start, end := buff.GetBounds()
 	data, err := buff.GetText(start, end, true)
 	if err != nil {
@@ -121,9 +119,7 @@ func (app *NetAssistantApp) update(recvStr string) {
 	app.labelReceveCount.SetText("Recv Count:" + strconv.Itoa(app.receCount))
 	app.tbReceData.CreateMark("end", iter, false)
 	mark := app.tbReceData.GetMark("end")
-
 	app.tvDataReceive.ScrollMarkOnscreen(mark)
-
 }
 
 func (app *NetAssistantApp) updateSendCount(count int) {
@@ -133,7 +129,6 @@ func (app *NetAssistantApp) updateSendCount(count int) {
 
 func (app *NetAssistantApp) handler(conn net.Conn) {
 	defer conn.Close() // close connection
-
 	for {
 		reader := bufio.NewReader(conn)
 		var buf [2048]byte
@@ -148,7 +143,6 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 					app.labelStatus.SetMarkup(tips)
 				})
 			}
-
 			for index, connItem := range app.connList {
 				if conn.LocalAddr().String() == connItem.LocalAddr().String() {
 					app.connList = append(app.connList[:index], app.connList[index+1:]...)
@@ -161,7 +155,6 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 		if !app.cbPauseDisplay.GetActive() {
 			glib.IdleAdd(app.update, recvStr) //Make sure is running on the gui thread.
 		}
-
 	}
 }
 
@@ -189,7 +182,6 @@ func (app *NetAssistantApp) onCbReceive2File() {
 }
 
 func (app *NetAssistantApp) onBtnLoadData() {
-
 	dialog, _ := gtk.FileChooserNativeDialogNew("Select File", app.appWindow, gtk.FILE_CHOOSER_ACTION_OPEN, "Select", "Cancel")
 	res := dialog.Run()
 	if res == int(gtk.RESPONSE_ACCEPT) {
@@ -238,17 +230,13 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 			app.addConnection(conn)
 			locallConnInfo := strings.Split(conn.LocalAddr().String(), ":")
 			app.updateAllStatus("TCP client connection succeeds", locallConnInfo[0], locallConnInfo[1])
-
 		} else {
 			app.updateAllStatus(err.Error(), "", "")
-
 			return err
 		}
-
 	}
 	if serverType == 1 { // TCP Server
 		listen, err := net.Listen("tcp", addr)
-
 		if err == nil {
 			log.Println("listen failed, err:", err)
 			app.updateStatus("TCP server connection succeeds")
@@ -264,14 +252,11 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 					glib.IdleAdd(func() {
 						app.labelStatus.SetMarkup(tips)
 					})
-
 					app.connList = append(app.connList, conn)
 					go app.handler(conn)
 				}
 			}()
-
 			app.updateAllStatus("TCP server connection succeeds", strIP, strPort)
-
 			app.listener = listen
 		} else {
 			app.updateStatus(err.Error())
@@ -290,7 +275,6 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 			app.updateStatus(err.Error())
 			return err
 		}
-
 	}
 
 	if serverType == 3 { // UDP Server
@@ -346,14 +330,12 @@ func (app *NetAssistantApp) disconnect(serverType int) error {
 }
 
 func (app *NetAssistantApp) onBtnConnect(button *gtk.Button) {
-
 	strIP, _ := app.entryIP.GetText()
 	strPort, _ := app.entryPort.GetText()
 	serverType := app.combProtoType.GetActive()
-
 	label, _ := app.btnConnect.GetLabel()
-	isDisconnect := label == "Disconnect"
 
+	isDisconnect := label == "Disconnect"
 	if isDisconnect {
 		if err := app.disconnect(serverType); err == nil {
 			app.btnConnect.SetLabel("Connect")
@@ -436,7 +418,6 @@ func (app *NetAssistantApp) onBtnSend() {
 						}
 					}
 					if len(app.connList) == 0 {
-
 						glib.IdleAdd(func() {
 							app.labelStatus.SetText("there's no connection")
 							app.btnSend.SetLabel("Send")
@@ -446,12 +427,9 @@ func (app *NetAssistantApp) onBtnSend() {
 				}
 				time.Sleep(time.Duration(cycleTime) * time.Millisecond)
 			}
-
 		}(cycle)
 	} else {
-
 		for _, conn := range app.connList {
-
 			if cc, ok := conn.(*net.UDPConn); ok && app.combProtoType.GetActive() == 3 {
 				strIP, _ := app.entryCurAddr.GetText()
 				strPort, _ := app.entryCurPort.GetText()
@@ -459,16 +437,13 @@ func (app *NetAssistantApp) onBtnSend() {
 				if err == nil {
 					cc.WriteToUDP(sendData, address)
 				}
-
 			} else {
 				conn.Write(sendData)
 			}
 			log.Println("Write data", data)
 			app.updateSendCount(len(sendData))
 		}
-
 	}
-
 	if app.cbAutoCleanAfterSend.GetActive() {
 		buff.SetText("")
 	}
@@ -477,7 +452,6 @@ func (app *NetAssistantApp) onBtnSend() {
 
 func (app *NetAssistantApp) onBtnClearRecvDisplay() {
 	app.tbReceData.SetText("")
-
 }
 
 func (app *NetAssistantApp) doActivate(application *gtk.Application) {
@@ -536,6 +510,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	notebookTab, _ := gtk.NotebookNew()
 	label1, _ := gtk.LabelNew("Recv Settings")
 	label2, _ := gtk.LabelNew("Send Settings")
+
 	//  Recv Settings
 	frame1ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	app.cbReceive2File, _ = gtk.CheckButtonNewWithLabel("Receive steering files")
@@ -557,6 +532,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	frame1ContentBox.PackStart(app.cbPauseDisplay, false, false, 0)
 	frame1ContentBox.PackStart(btnHboxContainer, false, false, 0)
 	frame1ContentBox.SetBorderWidth(10)
+
 	// Send Settings
 	frame2ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	app.cbAppendNewLine, _ = gtk.CheckButtonNewWithLabel("Append \\r\\n")
@@ -666,13 +642,13 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 }
 
 func main() {
-
 	const appID = "com.github.baloneo.netassistant"
 	application, err := gtk.ApplicationNew(appID, glib.APPLICATION_NON_UNIQUE)
 
 	if err != nil {
 		log.Fatal("Could not create application.", err)
 	}
+
 	app := NetAssistantAppNew()
 	application.Connect("activate", app.doActivate)
 
