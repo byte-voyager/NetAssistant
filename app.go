@@ -254,7 +254,7 @@ func (app *NetAssistantApp) createConnect(serverType int, strIP, strPort string)
 			app.updateStatus("TCP server connection succeeds")
 			go func() {
 				for {
-					conn, err := listen.Accept() // 等待客户端
+					conn, err := listen.Accept()
 					if err != nil {
 						log.Println("accept err:", err)
 						return
