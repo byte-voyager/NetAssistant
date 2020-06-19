@@ -24,6 +24,5 @@
 go build .
 ```
 
-![APP](./demo2.png)
 ![APP](./demo.png)
 
