@@ -161,10 +161,6 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 	}
 }
 
-func init() {
-	// log.SetFlags(log.Lshortfile | log.Ldate | log.Ltime)
-}
-
 func (app *NetAssistantApp) onBtnCleanCount() {
 	app.receCount = 0
 	app.sendCount = 0
