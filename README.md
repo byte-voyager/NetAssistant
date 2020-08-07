@@ -2,8 +2,6 @@
 
 Network assistant program based on Gotk3
 
-Linux网络调试助手
-
 - [x] TCP Client
 - [x] TCP Server
 - [x] UDP Client
