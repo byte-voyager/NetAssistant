@@ -7,6 +7,8 @@ Network assistant program based on Gotk3
 - [x] UDP Client
 - [x] UDP Server
 
+## Run
+Download `baloneo.netassistant` from releases.
 
 ### Build
 ```
