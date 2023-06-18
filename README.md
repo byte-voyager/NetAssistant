@@ -12,6 +12,7 @@ Download `baloneo.netassistant` from releases.
 
 ### Build
 ```
+go get
 go build .
 ```
 
