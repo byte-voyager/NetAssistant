@@ -156,7 +156,31 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 		app.receCount += n
 		recvStr := string(buf[:n])
 		if !app.cbPauseDisplay.GetActive() {
-			glib.IdleAdd(app.update, recvStr) //Make sure is running on the gui thread.
+			glib.IdleAdd(func() {
+				list := []string{}
+				if app.cbHexDisplay.GetActive() {
+					for i := 0; i < len(recvStr); i++ {
+						log.Debug(i, recvStr[i])
+						list = append(list, fmt.Sprintf("%X", recvStr[i]))
+					}
+					recvStr = strings.Join(list, " ")
+				}
+
+				if app.cbDisplayDate.GetActive() {
+					recvStr = fmt.Sprintf("[%s]:%s\n", time.Now().Format("2006-01-02 15:04:05"), recvStr)
+				}
+
+				if app.cbReceive2File.GetActive() {
+					appendConntent2File(app.fileName, []byte(recvStr))
+				}
+
+				iter := app.tbReceData.GetEndIter()
+				app.tbReceData.Insert(iter, recvStr)
+				app.labelReceveCount.SetText("Recv Count:" + strconv.Itoa(app.receCount))
+				app.tbReceData.CreateMark("end", iter, false)
+				mark := app.tbReceData.GetMark("end")
+				app.tvDataReceive.ScrollMarkOnscreen(mark)
+			}) //Make sure is running on the gui thread.
 		}
 	}
 }
@@ -525,7 +549,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	btnHboxContainer, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	app.btnSaveData, _ = gtk.ButtonNewWithLabel("Save")
 	app.btnSaveData.Connect("clicked", app.onBtnSaveData)
-	app.btnClearRecvDisplay, _ = gtk.ButtonNewWithLabel("Empty")
+	app.btnClearRecvDisplay, _ = gtk.ButtonNewWithLabel("Clear")
 	app.btnClearRecvDisplay.Connect("clicked", app.onBtnClearRecvDisplay)
 
 	btnHboxContainer.PackStart(app.btnSaveData, true, false, 0)
@@ -540,14 +564,14 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	// Send Settings
 	frame2ContentBox, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 10)
 	app.cbAppendNewLine, _ = gtk.CheckButtonNewWithLabel("Append \\r\\n")
-	app.cbAutoCleanAfterSend, _ = gtk.CheckButtonNewWithLabel("Auto empty")
+	app.cbAutoCleanAfterSend, _ = gtk.CheckButtonNewWithLabel("Auto clear")
 	app.cbSendByHex, _ = gtk.CheckButtonNewWithLabel("Send in 16 decimal")
 	app.cbDataSourceCycleSend, _ = gtk.CheckButtonNewWithLabel("Send circularly")
 	app.entryCycleTime, _ = gtk.EntryNew()
 	app.entryCycleTime.SetPlaceholderText("default 1000(ms)")
 	btnHboxContainer2, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
 	app.btnLoadData, _ = gtk.ButtonNewWithLabel("Load Data")
-	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("Empty")
+	app.btnClearSendDisplay, _ = gtk.ButtonNewWithLabel("Clear")
 	app.btnLoadData.Connect("clicked", app.onBtnLoadData)
 	app.btnClearSendDisplay.Connect("clicked", func() {
 		buff, _ := app.tvDataSend.GetBuffer()
