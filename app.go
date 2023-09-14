@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
@@ -41,7 +40,7 @@ const (
 	IT_SEND           string = "Send"
 	IT_APPEND_RN      string = "Append \\r\\n"
 	IT_AUTO_CLEAR     string = "Auto clear"
-	IT_SEND_HEX       string = "Send hex"
+	IT_SEND_HEX       string = "Send HEX"
 	IT_SEND_CIRC      string = "Send circularly"
 	IT_LOAD_DATA      string = "Load data"
 	IT_DATA_RECVED    string = "Data received"
@@ -191,7 +190,7 @@ func (app *NetAssistantApp) update(recvStr string) {
 	}
 
 	if app.cbDisplayDate.GetActive() {
-		recvStr = fmt.Sprintf("[%s]:%s\n", time.Now().Format("2006-01-02 15:04:05"), recvStr)
+		recvStr = fmt.Sprintf("[%s]%s\n", time.Now().Format(time.DateTime+".000000"), recvStr)
 	}
 
 	if app.cbReceive2File.GetActive() {
@@ -218,11 +217,11 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 		var buf [2048]byte
 		n, err := reader.Read(buf[:])
 		if err != nil {
-			log.Info("close connection:", err)
+			log.Info("connection closed:", err)
 			_, ok := conn.(*net.UDPConn)
 			if !ok {
 				ss := conn.RemoteAddr().String()
-				tips := fmt.Sprintf(`<span foreground="pink">connection closed: %s </span>`, ss)
+				tips := fmt.Sprintf(`<span foreground="red">connection closed: %s </span>`, ss)
 				glib.IdleAdd(func() {
 					app.labelStatus.SetMarkup(tips)
 				})
@@ -242,13 +241,13 @@ func (app *NetAssistantApp) handler(conn net.Conn) {
 				if app.cbHexDisplay.GetActive() {
 					for i := 0; i < len(recvStr); i++ {
 						log.Debug(i, recvStr[i])
-						list = append(list, fmt.Sprintf("%X", recvStr[i]))
+						list = append(list, fmt.Sprintf("%02X", recvStr[i]))
 					}
 					recvStr = strings.Join(list, " ")
 				}
 
 				if app.cbDisplayDate.GetActive() {
-					recvStr = fmt.Sprintf("[%s]:%s\n", time.Now().Format("2006-01-02 15:04:05"), recvStr)
+					recvStr = fmt.Sprintf("[%s]%s\n", time.Now().Format(time.DateTime+".000000"), recvStr)
 				}
 
 				if app.cbReceive2File.GetActive() {
@@ -271,6 +270,7 @@ func (app *NetAssistantApp) onBtnCleanCount() {
 	app.sendCount = 0
 	app.labelReceveCount.SetText(getI18nText(IT_RECEVER_COUNT))
 	app.labelSendCount.SetText(getI18nText(IT_SEND_COUNT))
+	app.labelStatus.SetText("")
 }
 
 func (app *NetAssistantApp) onCbReceive2File() {
@@ -290,7 +290,7 @@ func (app *NetAssistantApp) onBtnLoadData() {
 	res := dialog.Run()
 	if res == int(gtk.RESPONSE_ACCEPT) {
 		fileName := dialog.FileChooser.GetFilename()
-		data, err := ioutil.ReadFile(fileName)
+		data, err := os.ReadFile(fileName)
 		if err != nil {
 			log.Error(err)
 		} else {
@@ -608,7 +608,7 @@ func (app *NetAssistantApp) doActivate(application *gtk.Application) {
 	labelPort, _ := gtk.LabelNew(getI18nText(IT_PORT))
 	labelPort.SetXAlign(0)
 	app.entryPort, _ = gtk.EntryNew()
-	app.entryPort.SetText("8003")
+	app.entryPort.SetText("50023")
 	verticalBox.PackStart(labelPort, false, false, 0)
 	verticalBox.PackStart(app.entryPort, false, false, 0)
 	app.btnConnect, _ = gtk.ButtonNewWithLabel(getI18nText(IT_CONNECT))
@@ -768,7 +768,7 @@ func init() {
 }
 
 func main() {
-	const appID = "com.github.baloneo.netassistant"
+	const appID = "com.github.bytevoyager.netassistant"
 	application, err := gtk.ApplicationNew(appID, glib.APPLICATION_NON_UNIQUE)
 
 	if err != nil {
